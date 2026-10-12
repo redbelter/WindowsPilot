@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <!-- Windows-targeted TFM: Win32 interop + (later) WinRT WGC capture -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>WindowsPilot</AssemblyName>
+    <RootNamespace>WindowsPilot</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <Version>0.1.1-rig1</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same MCP server SDK + version proven live by HermesHyperV (:5003) -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+    <!-- UIA3 engine — same library already proven on this machine via pythonnet -->
+    <PackageReference Include="FlaUI.Core" Version="4.0.0" />
+    <PackageReference Include="FlaUI.UIA3" Version="4.0.0" />
+  </ItemGroup>
+
+</Project>

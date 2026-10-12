@@ -1,0 +1,123 @@
+<!doctype html>
+<!--
+WindowsPilot console — zero-build SPA, same-origin (hyperv dashboard DNA).
+All API calls carry ?token= from localStorage; WS frames ride the same token.
+Tabs: Screen | Inspect | Operator | Audit | Target. Pinned bar: arm/STOP.
+CSS vars match the app theme when embedded; standalone keeps its own defaults.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WindowsPilot</title>
+<style>
+:root{--bg:#0b0d10;--panel:#12161b;--line:#222933;--fg:#e6e9ee;--mut:#8a93a0;--acc:#f43f5e;--ok:#22c55e;--warn:#f59e0b}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 "Segoe UI",system-ui,sans-serif;height:100%}
+#bar{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+#bar .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+#bar select,#bar input,#bar button{background:#0e1216;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+#stop{background:var(--acc);border:0;color:#fff;font-weight:700;border-radius:6px;padding:6px 14px;cursor:pointer}
+#armBtn{cursor:pointer}
+#tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--line)}
+#tabs button{background:none;border:1px solid transparent;border-bottom:0;color:var(--mut);padding:6px 12px;border-radius:8px 8px 0 0;cursor:pointer}
+#tabs button.on{background:var(--panel);border-color:var(--line);color:var(--fg)}
+main{padding:12px}
+.pill{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--mut)}
+.pill.act{color:var(--acc);border-color:var(--acc)}
+.pill.drive{color:var(--warn);border-color:var(--warn)}
+#log{border-top:1px solid var(--line);max-height:120px;overflow:auto;font:11px/1.5 ui-monospace,Consolas;padding:6px 12px;color:var(--mut)}
+/* screen */
+#scrWrap{position:relative;display:inline-block;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+#scr,#ovl{display:block;max-width:100%;height:auto}
+#ovl{position:absolute;inset:0;pointer-events:none}
+#scrCtl{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+label.chk{color:var(--mut);user-select:none}
+/* inspect */
+#ins{display:grid;grid-template-columns:340px 1fr;gap:12px}
+#tree{background:var(--panel);border:1px solid var(--line);border-radius:8px;max-height:60vh;overflow:auto;padding:6px;font:12px ui-monospace,Consolas}
+.trow{padding:1px 4px;border-radius:4px;cursor:pointer;white-space:nowrap}
+.trow:hover,.trow.sel{background:#1b222c}
+.trow .ct{color:var(--mut)}.trow .nm{color:var(--fg)}.trow .rf{color:var(--acc);margin-left:6px;font-size:10px}
+#props{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:60vh;overflow:auto}
+#props table{border-collapse:collapse;width:100%}
+#props td{border-bottom:1px solid var(--line);padding:3px 6px;vertical-align:top}
+#props td:first-child{color:var(--mut);width:170px}
+.pbtn{margin:2px 2px 6px 0}
+/* operator + audit */
+#ops,#audit{max-height:70vh;overflow:auto}
+.op{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:var(--panel)}
+.op .hd{display:flex;gap:10px;align-items:center}
+.op .shots{display:flex;gap:8px;margin-top:6px}
+.op .shots img{max-height:140px;border:1px solid var(--line);border-radius:6px;cursor:zoom-in}
+.badge{font-size:10px;border-radius:4px;padding:1px 6px;border:1px solid var(--line)}
+.badge.ok{color:var(--ok)}.badge.err{color:var(--acc)}
+#audit table{width:100%;border-collapse:collapse;font:11px ui-monospace,Consolas}
+#audit td,#audit th{border-bottom:1px solid var(--line);padding:3px 6px;text-align:left}
+#audit th{color:var(--mut);font-weight:500}
+/* target */
+#target pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto}
+#lightbox{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center;z-index:50}
+#lightbox img{max-width:95%;max-height:95%}
+.warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<div id="bar">
+  <span class="dot" id="stateDot"></span>
+  <b>WindowsPilot</b>
+  <span id="hostPill" class="pill">…</span>
+  <span id="armPill" class="pill">read</span>
+  <span id="tierPill" class="pill">tier:?</span>
+  <span style="flex:1"></span>
+  <button id="armBtn" title="arm injection scope">ARM: act ▾</button>
+  <button id="driveBtn" class="pill" title="take manual control (mutually exclusive with agent act)">DRIVE</button>
+  <button id="stop" title="panic: disarm + drop queued input">STOP ■</button>
+  <input id="tok" type="password" size="14" placeholder="token (act)" title="paste tokens.json act-token; stored in this browser only">
+</div>
+<div id="tabs">
+  <button data-tab="screen" class="on">Screen</button>
+  <button data-tab="inspect">Inspect</button>
+  <button data-tab="operator">Operator</button>
+  <button data-tab="audit">Audit</button>
+  <button data-tab="target">Target</button>
+</div>
+<main>
+  <section id="paneScreen">
+    <div id="scrCtl">
+      <label class="chk"><input type="checkbox" id="ckMarks" checked> marks</label>
+      <label class="chk"><input type="checkbox" id="ckDrive"> drive</label>
+      <span class="pill" id="fpsPill">frames: —</span>
+      <span class="pill" id="driveLock" hidden style="color:var(--warn)">DRIVE: you hold the mouse — agent is locked out</span>
+    </div>
+    <div id="scrWrap"><canvas id="scr" width="1280" height="720"></canvas><canvas id="ovl" width="1280" height="720"></canvas></div>
+  </section>
+
+  <section id="paneInspect" hidden>
+    <div id="scrCtl">
+      <button id="rescan">rescan tree</button>
+      <button id="pick" title="next click on the screen canvas selects that element">crosshair</button>
+      <span class="pill" id="treeInfo"></span>
+    </div>
+    <div id="ins">
+      <div id="tree">…</div>
+      <div id="props">select a node</div>
+    </div>
+  </section>
+
+  <section id="paneOperator" hidden><div id="ops">agent actions will appear here (host=mcp audit lines)</div></section>
+  <section id="paneAudit" hidden>
+    <div id="scrCtl">
+      <button id="auditRefresh">refresh</button>
+      <input id="auditFilter" placeholder="filter by tool" size="16">
+      <a href="#" id="csv" class="pill">csv export</a>
+    </div>
+    <div id="audit"></div>
+  </section>
+  <section id="paneTarget" hidden><div id="target"><pre id="tgt">loading…</pre></div></section>
+</main>
+<div id="log"></div>
+<div id="lightbox"><img id="lbImg"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

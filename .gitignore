@@ -1,0 +1,9 @@
+bin/
+obj/
+*.user
+.vs/
+publish/
+stage/
+*.binlog
+audit/
+shots/

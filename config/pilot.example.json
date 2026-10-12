@@ -1,0 +1,40 @@
+{
+  "_comment": "Copy to %LOCALAPPDATA%\\WindowsPilot\\pilot.json. Every key env-overridable: PILOT_PORT, PILOT_BIND, PILOT_ALLOW_MCP_ARM, PILOT_AUTO_ARM, PILOT_SUPERVISED, PILOT_DATA_DIR.",
+  "bind": "0.0.0.0",
+  "port": 8791,
+  "data_dir": "",
+  "governance": {
+    "allow_mcp_arm": false,
+    "auto_arm": "never",
+    "supervised": false,
+    "rate_per_min": 60,
+    "rate_burst": 20,
+    "arm_ttl_min": 15,
+    "denylist_extra": []
+  },
+  "uia": {
+    "per_op_timeout_ms": 5000,
+    "max_nodes": 2000,
+    "budget_ms": 2000,
+    "max_depth": 25
+  },
+  "capture": {
+    "prefer": "wgc",
+    "idle_fps": 2,
+    "active_fps": 6,
+    "jpeg_quality": 70,
+    "max_edge": 1568
+  },
+  "audit": {
+    "retain_days": 30,
+    "redact_text": true,
+    "save_shots": true
+  },
+  "vision": {
+    "marks": true,
+    "max_marks": 150
+  },
+  "rig": {
+    "profile": false
+  }
+}
