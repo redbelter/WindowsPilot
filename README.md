@@ -92,3 +92,26 @@ arm/act scopes, launch+find Notepad, UIA value write read back
 (`HELLO-PILOT-42`), coordinate click, screenshot marks, `stale_ref`
 self-heal, panic hotkey, MCP `tools/call` with structured errors, audit
 trail, console serving.
+
+## Portable smoke tests
+
+`tests/windowspilot_smoke.py` runs against **any** machine where WindowsPilot is
+listening — stdlib Python 3 only, no test framework, no Hyper-V coupling:
+
+```
+python tests/windowspilot_smoke.py --base http://<vm>:8791 [--token ***] [--only notepad,calculator]
+```
+
+* **health** — server answers, interactive session (not Session 0), act scope
+  reachable (arms itself if disarmed).
+* **notepad** — launches Notepad, finds the editor (modern `Document` or classic
+  `Edit`), types a unique marker, reads it back through UIA text (not pixels),
+  kills it and verifies the window is gone.
+* **calculator** — launches Calculator (modern XAML app or classic `calc.exe` /
+  `win32calc` on Server SKUs), computes 7×8 by **invoking UIA buttons**, and
+  verifies the display reads **56** — reading numbers by regex so localized
+  displays don't break it. Locates buttons by AutomationId first (language
+  independent), falling back to name patterns for the classic app.
+
+All three exercise the same governed seam the agents use (launch/type/click/
+kill through `/api/act` jobs, findings through `/api/find`).

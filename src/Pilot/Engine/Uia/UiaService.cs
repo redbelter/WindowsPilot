@@ -270,9 +270,11 @@ public sealed class UiaService : IAsyncDisposable
             if (q.NameContains is not null && name.IndexOf(q.NameContains, StringComparison.OrdinalIgnoreCase) < 0) return false;
             if (q.NameRegex is not null && !System.Text.RegularExpressions.Regex.IsMatch(
                     name, q.NameRegex, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(100))) return false;
-            // an empty query matches nothing — force callers to ask for something
+            // a fully unscoped (desktop-wide) query must ask for a property;
+            // a window/process/ref-scoped query may enumerate its whole subtree
             return q.NameContains is not null || q.NameRegex is not null || q.AutomationId is not null
-                || q.ClassName is not null || q.ControlType is not null;
+                || q.ClassName is not null || q.ControlType is not null
+                || q.Ref is not null || q.Hwnd is not null || q.Process is not null;
         }
         catch { return false; }
     }
