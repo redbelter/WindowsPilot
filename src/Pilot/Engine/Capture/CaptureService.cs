@@ -175,7 +175,7 @@ public sealed class CaptureService(PilotSettings cfg, ILogger<CaptureService> lo
             ulong h = 0; int bit = 0;
             double sum = 0; var px = new double[64];
             for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++)
-                { var c = small.GetPixel(x, y); px[bit++] = (c.R + c.G + c.B) / 3.0; sum += px[^1]; }
+                { var c = small.GetPixel(x, y); px[bit] = (c.R + c.G + c.B) / 3.0; sum += px[bit]; bit++; }
             double avg = sum / 64; bit = 0;
             for (int i = 0; i < 64; i++) if (px[i] > avg) h |= 1UL << bit++;
             return h;

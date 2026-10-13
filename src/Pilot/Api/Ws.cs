@@ -45,6 +45,18 @@ public static class ViewWs
                 origin = meta.SourceOrigin, capture_tier = meta.CaptureTier, armed = arm.Info.Armed }),
                 WebSocketMessageType.Text);
 
+            // instant paint: latest captured frame even if the screen is still
+            var seed = hub.Latest;
+            if (seed is not null)
+            {
+                await Send(seed.Jpeg, WebSocketMessageType.Binary);
+                await Send(JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    type = "meta", scale = seed.Meta.Scale, origin = seed.Meta.SourceOrigin,
+                    tier = seed.Meta.CaptureTier, seq = hub.Seq, armed = arm.Info.Armed,
+                }), WebSocketMessageType.Text);
+            }
+
             var pump = Task.Run(async () =>
             {
                 try

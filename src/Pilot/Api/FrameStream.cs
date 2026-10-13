@@ -15,12 +15,14 @@ public sealed class FrameHub
     readonly List<Channel<Frame>> _subs = [];
     readonly object _gate = new();
     public long Seq { get; private set; }
+    public Frame? Latest { get; private set; }   // new subscribers get this instantly
 
     public void Publish(Frame f)
     {
         lock (_gate)
         {
             Seq++;
+            Latest = f;
             foreach (var s in _subs) s.Writer.TryWrite(f);
         }
     }
