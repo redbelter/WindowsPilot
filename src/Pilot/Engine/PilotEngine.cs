@@ -381,6 +381,9 @@ public sealed class PilotEngine(
     public Task<VerifyBundle> InvokeAsync(CallContext cx, string r, bool verify)
         => Mutate(cx, "pilot_invoke", new { @ref = r }, verify, () => uia.RunPattern(r, "invoke", null));
 
+    public Task<VerifyBundle> FocusAsync(CallContext cx, string r, bool verify)
+        => Mutate(cx, "pilot_focus", new { @ref = r }, verify, () => uia.RunPattern(r, "focus", null));
+
     public Task<VerifyBundle> ToggleAsync(CallContext cx, string r, bool verify)
         => Mutate(cx, "pilot_toggle", new { @ref = r }, verify, () => uia.RunPattern(r, "toggle", null));
 

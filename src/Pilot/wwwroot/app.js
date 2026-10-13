@@ -137,11 +137,6 @@ function connectDrive() {
   dws = new WebSocket(`ws://${location.host}/ws/drive?token=${encodeURIComponent(TOKEN)}`);
   dws.onclose = () => { if (driveOn) setTimeout(connectDrive, 1000); $('#driveLock').hidden = true; $('#ckDrive').checked = false; };
 }
-$('#ckDrive').onchange = e => {
-  driveOn = e.target.checked;
-  $('#driveLock').hidden = !driveOn;
-  if (driveOn) connectDrive(); else if (dws) dws.close();
-};
 function sendD(m) { if (dws && dws.readyState === 1) dws.send(JSON.stringify(m)); }
 $('#scrWrap').addEventListener('contextmenu', e => e.preventDefault());
 $('#scrWrap').addEventListener('mousedown', e => {
@@ -204,21 +199,32 @@ function drawOverlay(hot) {
 }
 async function select(n) {
   selRef = n.ref;
+  const sp = $('#selPill'); if (sp) { sp.textContent = 'ref ' + n.ref; sp.className = 'pill act'; }
   try {
     const p = await api('/properties?ref=' + encodeURIComponent(n.ref));
     let html = '<table>'; for (const [k, v] of Object.entries(p)) html += `<tr><td>${k}</td><td>${esc(String(v).slice(0, 300))}</td></tr>`;
     html += '</table><div>';
     const pats = (p.patterns || '').split(',').filter(Boolean);
-    for (const pat of ['invoke', 'toggle', 'expand', 'select'])
+    for (const pat of ['invoke', 'toggle', 'select'])
       if (pats.includes(pat)) html += `<button class="pbtn" data-p="${pat}">${pat}</button>`;
+    if (pats.includes('expand')) html += `<button class="pbtn" data-p="expand">expand</button><button class="pbtn" data-p="collapse">collapse</button>`;
+    if (pats.includes('scroll')) html += `<button class="pbtn" data-p="scroll+" title="wheel down">scroll▾</button><button class="pbtn" data-p="scroll-" title="wheel up">scroll▴</button>`;
     if (pats.includes('value')) html += `<button class="pbtn" data-p="value">set_value…</button>`;
-    html += ` <button class="pbtn" data-p="focus">focus</button></div>`;
+    html += ` <button class="pbtn" data-p="focus">focus</button>
+      <button class="pbtn" data-p="click">click</button>
+      <button class="pbtn" data-p="typetarget" title="route the Operator type box to this ref">type here ▸</button></div>`;
     $('#props').innerHTML = html;
     for (const b of $('#props').querySelectorAll('.pbtn')) b.onclick = async () => {
       try {
-        let arg;
-        if (b.dataset.p === 'value') arg = prompt('new value');
-        await job(b.dataset.p === 'value' ? 'value' : b.dataset.p, { req: n.ref, text: arg, expand: true });
+        const P = b.dataset.p;
+        if (P === 'typetarget') { $('#opText').focus(); $('#opText').placeholder = 'type into ' + n.ref; $('#paneOperator').hidden = false; for (const x of document.querySelectorAll('#tabs button')) { x.classList.toggle('on', x.dataset.tab === 'operator'); } for (const s of document.querySelectorAll('main section')) s.hidden = s.id !== 'paneOperator'; return; }
+        if (P === 'value') {
+          const v = prompt('new value'); if (v === null) return;
+          await job('value', { req: n.ref, value: v, verify: true });
+        } else if (P === 'collapse') await job('expand', { req: n.ref, expand: false, verify: true });
+        else if (P === 'scroll+' || P === 'scroll-') await job('scroll', { req: n.ref, delta_y: P === 'scroll+' ? -3 : 3, delta_x: 0 });
+        else if (P === 'click') await job('click', { req: n.ref, verify: true });
+        else await job(P, { req: n.ref, verify: true });
         rescan();
       } catch (e) { alert(e.message); }
     };
@@ -246,7 +252,7 @@ async function pickAt(e) {
 // ---------- operator tab -----------------------------------------------------
 let opN = 0;
 async function opsRefresh() {
-  const { items } = await api('/audit?host=mcp&limit=60');
+  const { items } = await api('/audit?limit=60');   // both hosts — web acts visible too
   const el = $('#ops'); el.innerHTML = '';
   for (const it of items.slice().reverse()) {
     const d = document.createElement('div'); d.className = 'op';
@@ -291,5 +297,116 @@ async function targetRefresh() {
   try { $('#tgt').textContent = JSON.stringify(await api('/status'), null, 2); }
   catch (e) { $('#tgt').textContent = e.message; }
 }
+
+// ---------- marks snapshot (set-of-marks, parity with pilot_screenshot) ----
+let lastMarks = [];
+async function marksSnapshot() {
+  try {
+    const s = await api('/screenshot', { marks: true, max_edge: 1568, quality: 75 });
+    lastMarks = s.marks || [];
+    // paint the marked shot onto the screen canvas (pauses live frames briefly)
+    const img = new Image();
+    img.onload = () => {
+      const c = $('#scr');
+      if (c.width !== img.width) { c.width = img.width; c.height = img.height; $('#ovl').width = img.width; $('#ovl').height = img.height; }
+      c.getContext('2d').drawImage(img, 0, 0);
+    };
+    img.src = s.image_url + '?token=' + encodeURIComponent(TOKEN);
+    renderChips();
+    logLine('marks: ' + lastMarks.length + (s.empty_marks_hint ? ' (' + s.empty_marks_hint + ')' : ''));
+  } catch (e) { alert('marks: ' + e.message); }
+}
+function renderChips() {
+  const el = $('#markChips'); el.innerHTML = '';
+  for (const m of lastMarks) {
+    const b = document.createElement('span');
+    b.className = 'chip'; b.textContent = m.n + ' ' + (m.control_type || '') + ' ' + (m.name || '').slice(0, 18);
+    b.title = 'click mark ' + m.n + ' → ' + m.ref;
+    b.onmouseenter = () => drawMarkBox(m);
+    b.onclick = async () => {
+      try { await job('click', { mark: m.n, verify: true }); logLine('clicked mark ' + m.n + ' (' + m.ref + ')'); }
+      catch (e) { alert(e.message); }
+    };
+    el.appendChild(b);
+  }
+}
+function drawMarkBox(m) {
+  const o = $('#ovl'); const g = o.getContext('2d');
+  drawOverlay();
+  if (!m.rect) return;
+  g.strokeStyle = '#f43f5e'; g.lineWidth = 3;
+  g.strokeRect((m.rect.x - hdr.origin.x) * hdr.scale, (m.rect.y - hdr.origin.y) * hdr.scale,
+    m.rect.w * hdr.scale, m.rect.h * hdr.scale);
+}
+$('#marksBtn').onclick = marksSnapshot;
+$('#pickXY').onclick = opClickXY;
+$('#snapBtn').onclick = async () => {
+  try {
+    const s = await api('/screenshot', { marks: $('#ckMarks').checked, max_edge: 3840, quality: 92 });
+    window.open(s.image_url + '?token=' + encodeURIComponent(TOKEN), '_blank');
+  } catch (e) { alert(e.message); }
+};
+
+// ---------- operator act console (full engine surface) ----------------------
+function opClickXY() {           // click the screen canvas to fill x/y boxes
+  const on = $('#scr').dataset.xy === '1';
+  $('#scr').dataset.xy = on ? '0' : '1';
+  logLine(on ? 'xy pick off' : 'click the screen to fill x,y (physical px)');
+}
+$('#scrWrap').addEventListener('click', e => {
+  if ($('#scr').dataset.xy !== '1') return;
+  const p = physFromEvent(e);
+  $('#opX').value = p.x; $('#opY').value = p.y;
+  $('#scr').dataset.xy = '0';
+  for (const x of document.querySelectorAll('#tabs button')) if (x.dataset.tab === 'operator') x.click();
+});
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
+  const T = b.dataset.act;
+  const n = v => $(v).value.trim();
+  const num = v => { const x = parseInt($(v).value, 10); return isNaN(x) ? null : x; };
+  const args = {
+    launch: () => ({ cmd: n('#opCmd'), args: n('#opArgs') || undefined, workdir: n('#opWdir') || undefined, wait_window_ms: 8000 }),
+    kill: () => ({ process: n('#opProc') || undefined, pid: num('#opPid') || undefined }),
+    type: () => ({ text: n('#opText'), mode: $('#opMode').value, verify: true }),
+    keys: () => ({ keys: n('#opKeys'), repeat: num('#opRepeat') || 1 }),
+    click: () => ({ x: num('#opX'), y: num('#opY'), button: $('#opBtn').value, clicks: num('#opClicks') || 1 }),
+    drag: () => ({ x1: num('#opX'), y1: num('#opY'), x2: num('#opX2'), y2: num('#opY2') }),
+    scroll: () => ({ delta_y: num('#opDy') || 0, delta_x: num('#opDx') || 0 }),
+    wait: () => ({
+      condition: {
+        type: $('#opWaitType').value,
+        process: n('#opWaitProc') || undefined, title_regex: n('#opWaitTitle') || undefined,
+        contains: n('#opWaitText') || undefined,
+        ref: ($('#opWaitType').value === 'text_matches' ? selRef : undefined),
+      },
+      timeout_s: num('#opWaitTo') || 15,
+    }),
+  }[T]();
+  if (T === 'wait') $('#waitPill').textContent = 'waiting…';
+  try {
+    const r = await job(T, args);
+    if (T === 'wait') $('#waitPill').textContent = 'matched:' + (r && r.matched) + (r && r.waited_ms ? ' ' + r.waited_ms + 'ms' : '');
+    else logLine(T + ' ok');
+    opsRefresh();
+  } catch (e) {
+    $('#waitPill').textContent = '';
+    alert(T + ': ' + e.message);
+  }
+});
+// ref-carrying ops: type/click/value reuse the inspected ref
+const _origJob = job;
+job = async function (tool, args) {
+  if (selRef && ['type'].includes(tool) && !args.req) args = Object.assign({ req: selRef }, args);
+  return _origJob(tool, args);
+};
+
+// ---------- drive arming (parity: /arm scope=drive, then the ws opens) ------
+$('#ckDrive').onchange = async e => {
+  driveOn = e.target.checked;
+  $('#driveLock').hidden = !driveOn;
+  if (!driveOn) { if (dws) dws.close(); return; }
+  try { await api('/arm', { scope: 'drive', ttl_min: 15, why: 'console-drive' }); status(); connectDrive(); }
+  catch (err) { alert('drive arm failed: ' + err.message); $('#ckDrive').checked = false; driveOn = false; $('#driveLock').hidden = true; }
+};
 
 window.addEventListener('error', e => logLine('js: ' + e.message));

@@ -10,7 +10,7 @@
     <AssemblyName>WindowsPilot</AssemblyName>
     <RootNamespace>WindowsPilot</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <Version>0.1.1-rig1</Version>
+    <Version>0.1.3-parity</Version>
   </PropertyGroup>
 
   <ItemGroup>

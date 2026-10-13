@@ -45,6 +45,13 @@ label.chk{color:var(--mut);user-select:none}
 .pbtn{margin:2px 2px 6px 0}
 /* operator + audit */
 #ops,#audit{max-height:70vh;overflow:auto}
+.opgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+main input,main select,main button{background:#0e1216;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 7px;font:12px "Segoe UI",sans-serif}
+main button{cursor:pointer}main button:hover{border-color:var(--acc)}
+.mut{color:var(--mut)}
+fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
+.chip{border:1px solid var(--acc);color:var(--acc);border-radius:5px;padding:1px 7px;cursor:pointer;font-size:11px}
+.chip:hover{background:var(--acc);color:#fff}
 .op{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px;background:var(--panel)}
 .op .hd{display:flex;gap:10px;align-items:center}
 .op .shots{display:flex;gap:8px;margin-top:6px}
@@ -84,11 +91,14 @@ label.chk{color:var(--mut);user-select:none}
 <main>
   <section id="paneScreen">
     <div id="scrCtl">
-      <label class="chk"><input type="checkbox" id="ckMarks" checked> marks</label>
+      <label class="chk"><input type="checkbox" id="ckMarks"> marks snapshot</label>
+      <button id="marksBtn" title="grab a fresh marks screenshot; boxes + clickable chips appear">marks ▸</button>
+      <button id="snapBtn" title="full-quality still of the current frame">snapshot</button>
       <label class="chk"><input type="checkbox" id="ckDrive"> drive</label>
       <span class="pill" id="fpsPill">frames: —</span>
       <span class="pill" id="driveLock" hidden style="color:var(--warn)">DRIVE: you hold the mouse — agent is locked out</span>
     </div>
+    <div id="markChips" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px"></div>
     <div id="scrWrap"><canvas id="scr" width="1280" height="720"></canvas><canvas id="ovl" width="1280" height="720"></canvas></div>
   </section>
 
@@ -104,7 +114,37 @@ label.chk{color:var(--mut);user-select:none}
     </div>
   </section>
 
-  <section id="paneOperator" hidden><div id="ops">agent actions will appear here (host=mcp audit lines)</div></section>
+  <section id="paneOperator" hidden>
+    <div class="opgrid">
+      <fieldset class="op"><legend>launch / kill</legend>
+        <input id="opCmd" placeholder="cmd (notepad.exe)" size="16"><input id="opArgs" placeholder="args" size="10"><input id="opWdir" placeholder="workdir" size="10">
+        <button data-act="launch">Launch</button>
+        <input id="opProc" placeholder="process (notepad)" size="14">pid <input id="opPid" placeholder="—" size="4"><button data-act="kill">Kill</button>
+      </fieldset>
+      <fieldset class="op"><legend>type / keys <span class="pill" id="selPill">no ref</span></legend>
+        <input id="opText" placeholder="text to type" size="22">
+        <select id="opMode"><option value="auto">auto</option><option value="keys">keys</option><option value="unicode">unicode</option><option value="paste">paste</option></select>
+        <button data-act="type">Type</button>
+        <input id="opKeys" placeholder="chords: ctrl+s,enter" size="18"><input id="opRepeat" type="number" value="1" min="1" max="100" style="width:46px"><button data-act="keys">Chords</button>
+      </fieldset>
+      <fieldset class="op"><legend>click / drag (physical px)</legend>
+        x<input id="opX" type="number" style="width:64px" value="0"> y<input id="opY" type="number" style="width:64px" value="0">
+        <select id="opBtn"><option>left</option><option>right</option><option>middle</option></select>
+        ×<input id="opClicks" type="number" value="1" min="1" max="3" style="width:40px"><button data-act="click">Click</button>
+        <button id="pickXY" title="click on the Screen canvas to fill x,y">pick xy</button>
+        <span class="mut">→ drag x2</span> <input id="opX2" type="number" style="width:64px" value="0"> y2<input id="opY2" type="number" style="width:64px" value="0"> <button data-act="drag">Drag</button>
+      </fieldset>
+      <fieldset class="op"><legend>scroll / wait</legend>
+        dy<input id="opDy" type="number" value="3" style="width:52px"> dx<input id="opDx" type="number" value="0" style="width:52px"><button data-act="scroll">Scroll</button>
+        <select id="opWaitType"><option value="window_opened">window_opened</option><option value="window_closed">window_closed</option><option value="window_foreground">window_foreground</option><option value="element_gone">element_gone</option><option value="text_matches">text_matches</option><option value="action_settled">action_settled</option></select>
+        <input id="opWaitProc" placeholder="process" size="9"><input id="opWaitTitle" placeholder="title regex" size="9"><input id="opWaitText" placeholder="contains" size="9">
+        <input id="opWaitTo" type="number" value="15" style="width:48px"><button data-act="wait">Wait</button>
+        <span class="pill" id="waitPill"></span>
+      </fieldset>
+    </div>
+    <hr style="border-color:var(--line)">
+    <div id="ops">agent actions will appear here (audit feed, both hosts)</div>
+  </section>
   <section id="paneAudit" hidden>
     <div id="scrCtl">
       <button id="auditRefresh">refresh</button>

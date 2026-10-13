@@ -5,6 +5,7 @@ using WindowsPilot.Core;
 using WindowsPilot.Engine;
 using WindowsPilot.Engine.Governance;
 using WindowsPilot.Engine.Uia;
+using WindowsPilot.Engine.Vision;
 
 namespace WindowsPilot.Api;
 
@@ -104,6 +105,14 @@ public static class PilotApi
             catch (Exception e) { return Results.Json(new Err { Error = "job_error", Msg = e.Message }, statusCode: 500); }
         }
 
+        static string ResolveMark(int mark)   // same contract as PilotTools.ResolveMark
+        {
+            var map = LastMarkMap.Current;
+            if (map is not null && map.TryGetValue(mark, out var r)) return r;
+            throw new PilotException("not_found", $"mark {mark} not in the last marks screenshot",
+                "take a fresh screenshot with marks:true first");
+        }
+
         api.MapGet("/status", async (PilotEngine e) => await Wrap(() => e.StatusAsync()));
 
         api.MapGet("/windows", async (PilotEngine e, bool? minimized) =>
@@ -133,30 +142,38 @@ public static class PilotApi
             var cx = ctx.Ctx();
             var jid = jobs.Spawn(req.Tool, async _ => req.Tool switch
             {
-                "click" => await e.ClickAsync(cx, req.Req, req.X, req.Y, req.Button ?? "left", req.Clicks ?? 1, req.Verify ?? true),
+                "click" => await e.ClickAsync(cx, req.Mark is int mk ? ResolveMark(mk) : req.Req, req.X, req.Y, req.Button ?? "left", req.Clicks ?? 1, req.Verify ?? true),
                 "drag" => await e.DragAsync(cx, req.Req, req.X1, req.Y1, req.X2 ?? 0, req.Y2 ?? 0, req.Steps ?? 12, req.DurationMs ?? 400, req.Verify ?? true),
                 "scroll" => await e.ScrollAsync(cx, req.Req, req.X, req.Y, req.DeltaY ?? 0, req.DeltaX ?? 0, false),
                 "type" => await e.TypeTextAsync(cx, req.Text ?? "", req.Req, req.Mode ?? "auto", req.Verify ?? true),
                 "keys" => await e.KeysAsync(cx, req.Keys ?? "", req.Repeat ?? 1, req.Verify ?? false),
-                "value" => await e.SetValueAsync(cx, req.Req ?? "", req.Text ?? "", req.Verify ?? true),
+                "value" => await e.SetValueAsync(cx, req.Req ?? "", req.Value ?? req.Text ?? "", req.Verify ?? true),
                 "invoke" => await e.InvokeAsync(cx, req.Req ?? "", req.Verify ?? true),
+                "focus" => await e.FocusAsync(cx, req.Req ?? "", req.Verify ?? true),
                 "toggle" => await e.ToggleAsync(cx, req.Req ?? "", req.Verify ?? true),
                 "expand" => await e.ExpandAsync(cx, req.Req ?? "", req.Expand ?? true, req.Verify ?? true),
                 "select" => await e.SelectAsync(cx, req.Req ?? "", req.Verify ?? true),
                 "launch" => await e.LaunchAsync(cx, req.Cmd ?? "", req.Args, req.Workdir, req.WaitWindowMs ?? 8000, true),
                 "kill" => await e.KillAppAsync(cx, req.Pid, req.Process),
+                "wait" => await e.WaitForAsync(req.Condition?.ToCondition()
+                        ?? throw new PilotException("bad_request", "wait needs a condition object",
+                            "{\"type\":\"element_appears\",\"query\":{...}} | window_opened {process|title_regex} | text_matches {ref,contains} ..."),
+                    req.TimeoutS ?? 30, req.IntervalMs ?? 250),
                 _ => throw new PilotException("not_found", $"unknown act tool '{req.Tool}'",
-                    "click drag scroll type keys value invoke toggle expand select launch kill"),
+                    "click drag scroll type keys value invoke focus toggle expand select launch kill wait"),
             });
             return Results.Json(new { job = jid });
         });
 
-        api.MapPost("/arm", (ArmReq req, ArmState armState, AuditLog audit, HttpContext ctx) =>
+        api.MapPost("/arm", async (ArmReq req, ArmState armState, AuditLog audit, HttpContext ctx) =>
         {
             if (req.Scope == "read") return Results.Json(armState.Disarm("web"));
-            var info = armState.Arm(Enum.Parse<ArmScope>(req.Scope, true), req.TtlMin, req.Why ?? "web-console", allowMcpArm: false);
-            audit.Write(ctx.Ctx().Host, "act", "arm", new { req.Scope, req.TtlMin }, null, new { }, new { ok = true });
-            return Results.Json(info);
+            return await Wrap(async () =>
+            {
+                var info = armState.Arm(Enum.Parse<ArmScope>(req.Scope, true), req.TtlMin, req.Why ?? "web-console", allowMcpArm: false);
+                audit.Write(ctx.Ctx().Host, "act", "arm", new { req.Scope, req.TtlMin }, null, new { }, new { ok = true });
+                return await Task.FromResult<object>(info);
+            });
         });
 
         api.MapPost("/panic", (KillSwitch kill, ArmState armState, AuditLog audit) =>
@@ -179,7 +196,9 @@ public static class PilotApi
 
         api.MapGet("/shots/{id}", (string id, PilotSettings cfg) =>
         {
-            var f = Path.Combine(cfg.ShotsDir, Path.GetFileName(id) + ".jpg");   // traversal-safe leaf only
+            var leaf = Path.GetFileName(id);                                   // traversal-safe leaf only
+            if (!leaf.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)) leaf += ".jpg";   // id-or-filename both work
+            var f = Path.Combine(cfg.ShotsDir, leaf);
             return File.Exists(f) ? Results.File(f, "image/jpeg") : Results.NotFound();
         });
 
@@ -233,6 +252,29 @@ public static class PilotApi
         [JsonPropertyName("wait_window_ms")] public int? WaitWindowMs { get; init; }
         [JsonPropertyName("pid")] public int? Pid { get; init; } [JsonPropertyName("process")] public string? Process { get; init; }
         [JsonPropertyName("verify")] public bool? Verify { get; init; }
+        [JsonPropertyName("mark")] public int? Mark { get; init; }                   // marks-screenshot number
+        [JsonPropertyName("value")] public string? Value { get; init; }             // set_value payload (alias: text)
+        [JsonPropertyName("condition")] public WaitReq? Condition { get; init; }    // tool=wait
+        [JsonPropertyName("timeout_s")] public int? TimeoutS { get; init; }
+        [JsonPropertyName("interval_ms")] public int? IntervalMs { get; init; }
+    }
+
+    public sealed record WaitReq
+    {
+        // Mirrors pilot_wait_for's WaitCondition (MCP) for the web console.
+        [JsonPropertyName("type")] public string Type { get; init; } = "";          // element_appears|element_gone|window_opened|window_closed|window_foreground|focused|text_matches|pixel_stable|action_settled
+        [JsonPropertyName("process")] public string? Process { get; init; }
+        [JsonPropertyName("title_regex")] public string? TitleRegex { get; init; }
+        [JsonPropertyName("ref")] public string? Ref { get; init; }
+        [JsonPropertyName("regex")] public string? Regex { get; init; }
+        [JsonPropertyName("contains")] public string? Contains { get; init; }
+        [JsonPropertyName("for_ms")] public int? ForMs { get; init; }
+        [JsonPropertyName("query")] public FindReq? Query { get; init; }
+        public WaitCondition ToCondition() => new()
+        {
+            Type = Type, Process = Process, TitleRegex = TitleRegex, Ref = Ref,
+            Regex = Regex, Contains = Contains, ForMs = ForMs ?? 800, Query = Query?.ToQuery(),
+        };
     }
 
     public sealed record ArmReq
