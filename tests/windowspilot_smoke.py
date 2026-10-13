@@ -131,21 +131,23 @@ def kill_processes(*names):
     time.sleep(0.6)
 
 
-def launch(cmd, args=None, procs=(), wait_s=25):
+def launch(cmd, args=None, procs=(), title_sub="", wait_s=25):
     """Launch via the act seam. A launch verb whose synchronous window-verify
     times out still *did* launch the app (the process exists; the window just
     came late — typical on a slow first launch of modern apps). The window is
     the source of truth, so only a launch that never produced a process/window
     counts as a hard failure (e.g. exe missing -> not_found from the seam)."""
+    def seen():
+        return win_by(procs=procs, title_sub=title_sub) is not None if (procs or title_sub) else True
     try:
         act("launch", cmd=cmd, args=args, wait_window_ms=4000)
         return True
     except RuntimeError as e:
         if "not_found" in str(e) or "launch failed" in str(e):
             return False
-        return wait(lambda: win_by(procs=procs) if procs else True, timeout=8) or False
+        return bool(wait(seen, timeout=8))
     except TimeoutError:
-        return wait(lambda: win_by(procs=procs) if procs else True, timeout=8) or False
+        return bool(wait(seen, timeout=8))
 
 
 # ---------------------------------------------------------------- tests
@@ -174,27 +176,44 @@ def test_notepad():
     marker = f"PILOT-{int(time.time()) % 100000}"
     kill_processes("notepad")
     try:
-        launch("notepad.exe", procs=("notepad",))
-        w = wait(lambda: win_by(procs=("notepad",)), timeout=15)
+        launch("notepad.exe", procs=("notepad",), title_sub="notepad")
+        w = wait(lambda: win_by(procs=("notepad",), title_sub="notepad"), timeout=15)
         assert w, "notepad window never appeared"
+
+        # Modern Notepad restores the previous session (tabs/content) on launch,
+        # which can swap the tree under us a beat after it opens. Wait for the
+        # window title to go quiet before touching anything.
+        last = None
+        stable_until = time.time() + 10
+        while time.time() < stable_until:
+            cur = (win_by(procs=("notepad",), title_sub="notepad") or {}).get("title")
+            if cur is not None and cur == last:
+                break
+            last, _ = cur, time.sleep(0.8)
+        w = win_by(procs=("notepad",), title_sub="notepad") or w
 
         # locate the editor: control type first, class/name fallbacks after.
         def editor():
-            return wait(lambda: find_first(
-                find(proc="notepad", max=800),
+            return find_first(
+                find(hwnd=w["hwnd"], max=800) or find(proc="notepad", max=800),
                 lambda e: (e.get("control_type") in ("Document", "Edit", "Text"))
-                or (e.get("class_name") in ("Edit", "RICHEDIT50W", "TextBox"))
-                or (e.get("name") or "").lower() in ("text editor", "editor")), timeout=8)
+                or (e.get("class_name") in ("Edit", "RICHEDIT50W", "RichEditD2DPT", "TextBox"))
+                or (e.get("name") or "").lower() in ("text editor", "editor"))
 
         ed = wait(editor, timeout=12)
         assert ed, "no text editor element found in notepad"
+        time.sleep(1.0)                      # restore may still be swapping refs
+        ed = editor() or ed                  # re-locate on the settled tree
 
         act("type", req=ed["ref"], text=marker, mode="auto")
 
-        # read back through a fresh find of the same ref (UIA text, not a screenshot)
+        # read back by scanning the window for the marker (UIA text, not a
+        # screenshot). Ref identity is deliberately NOT required: tab restore
+        # can re-create the element between the type and the read.
         def seen():
-            for e in find(proc="notepad", max=800):
-                if e.get("ref") == ed["ref"] and marker in (e.get("text_snippet") or ""):
+            for e in (find(hwnd=w["hwnd"], max=800) or find(proc="notepad", max=800)):
+                blob = " ".join(filter(None, [e.get("text_snippet"), e.get("name")]))
+                if marker in blob:
                     return True
             return False
         assert wait(seen, timeout=8), f"typed {marker!r} but could not read it back"
@@ -236,45 +255,53 @@ def test_calculator():
     elements across rounds until the needed buttons appear.
     Numeric extraction from the display is locale-proof (regex over digits)."""
     kill_processes("CalculatorApp", "calc", "win32calc", "Calculator")
+    procs = ("calc", "calculatorapp", "win32calc")   # classic Win32 calc.exe reports as 'win32calc' on Server SKUs
     try:
-        launched = launch("calc.exe", procs=("calc", "calculatorapp", "win32calc"))
-        procs = ("calc", "calculatorapp", "win32calc")   # classic Win32 calc.exe reports as 'win32calc' on Server SKUs
-        w = wait(lambda: win_by(procs=procs), timeout=12)
+        launched = launch("calc.exe", procs=procs, title_sub="calculator")
+        w = wait(lambda: win_by(procs=procs, title_sub="calculator"), timeout=12)
         if not launched or not w:
             # modern-only installs: shell-resolve the calculator: protocol
-            launch("calculator:", procs=procs)
-            w = wait(lambda: win_by(procs=procs), timeout=20)
+            launch("calculator:", procs=procs, title_sub="calculator")
+            w = wait(lambda: win_by(procs=procs, title_sub="calculator"), timeout=20)
         assert w, "calculator window never appeared"
 
-        pool = {}                                     # ref -> element, union across rounds
+        # Find by HWND, not process: on Win11 the XAML app's window is hosted
+        # by ApplicationFrameHost, so the window's process field never matches
+        # the app's process name. The hwnd always owns the real UIA subtree.
+        pool = {}
         def grow():
-            for e in find(proc=w["process"], max=500):
+            for e in find(hwnd=w["hwnd"], max=500):
                 pool[e["ref"]] = e
             return pool
-        wait(lambda: find_first(pool.values(), lambda e: e.get("control_type") == "Button"),
-             timeout=20) or grow()
+        grow()
+        wait(lambda: find_first(pool.values(), lambda e: e.get("control_type") == "Button") or grow(),
+             timeout=20)
         assert find_first(pool.values(), lambda e: e.get("control_type") == "Button"), \
             "calculator has no buttons in its UIA tree"
 
-        def press(auto_ids, name_res, label):
-            """Poll the growing tree until the button appears, then invoke it."""
-            def locate():
+        def press(auto_ids, name_res, label, expect=None):
+            """Poll the growing tree until the button appears, invoke it, and —
+            when `expect` is given — confirm the display actually changed.
+            Win11 Calculator accepts Invoke-pattern clicks while it is still
+            warming up and silently drops them, so a click that doesn't move
+            the display is retried (on a re-grown pool; refs may be stale)."""
+            how = None
+            for _ in range(3):
+                def locate():
+                    grow()
+                    e, how = _calc_button(list(pool.values()), auto_ids, name_res)
+                    return (e, how) if e else None
+                hit = wait(locate, timeout=25)
+                assert hit, f"could not find button {label!r} (no AutomationId match, no name match)"
+                e, how = hit
+                act("click", req=e["ref"])      # pattern-first invoke via the act seam
+                if expect is None:
+                    time.sleep(0.35)
+                    return how
                 grow()
-                e, how = _calc_button(list(pool.values()), auto_ids, name_res)
-                return (e, how) if e else None
-            hit = wait(locate, timeout=25)
-            assert hit, f"could not find button {label!r} (no AutomationId match, no name match)"
-            e, how = hit
-            act("click", req=e["ref"])          # pattern-first invoke via the act seam
-            return how
-
-        hows = {}
-        hows["7"] = press(["num7Button", "num7"], [re.compile(r"7")], "7")
-        hows["x"] = press(["multiplyButton", "timesButton", "mulButton"],
-                          [re.compile(r"[*×]"), re.compile(r"multipl\w*", re.I), re.compile(r"times", re.I)], "*")
-        hows["8"] = press(["num8Button", "num8"], [re.compile(r"8")], "8")
-        hows["="] = press(["equalButton", "equalsButton"],
-                          [re.compile(r"[=]"), re.compile(r"equ\w*", re.I)], "=")
+                if wait(lambda: result() == expect, timeout=4):
+                    return how
+            return how                          # last chance judged by the final assert
 
         def result():
             """Displayed number, whatever dialect the display speaks."""
@@ -296,6 +323,16 @@ def test_calculator():
             if not nums:
                 return None
             return nums[-1].replace(",", ".")   # last number = the live result
+
+
+        hows = {}
+        hows["7"] = press(["num7Button", "num7"], [re.compile(r"7")], "7", expect="7")
+        hows["x"] = press(["multiplyButton", "timesButton", "mulButton"],
+                          [re.compile(r"[*×]"), re.compile(r"multipl\w*", re.I), re.compile(r"times", re.I)],
+                          "*", expect="7")      # operand stays on screen after ×
+        hows["8"] = press(["num8Button", "num8"], [re.compile(r"8")], "8", expect="8")
+        hows["="] = press(["equalButton", "equalsButton"],
+                          [re.compile(r"[=]"), re.compile(r"equ\w*", re.I)], "=", expect="56")
 
         val = wait(lambda: result() in ("56", "56.0"), timeout=12)
         final = result()
