@@ -56,10 +56,15 @@ WindowsPilot needs an interactive desktop session — a Session-0 service is
 UIA/SendInput blind. Register it as an **Interactive** scheduled task:
 
 ```powershell
-$a  = New-ScheduledTaskAction -Execute cmd.exe -Argument "/c C:\WindowsPilot\app\WindowsPilot.exe >> C:\WindowsPilot\pilot.log 2>&1"
+# Launch the bare exe: the build is WinExe (GUI subsystem) and NEVER allocates
+# a console; a `cmd /c` wrapper would pop a visible terminal on the desktop.
+# Logs go to %LOCALAPPDATA%\WindowsPilot\pilot.log.
+$a  = New-ScheduledTaskAction -Execute "C:\WindowsPilot\app\WindowsPilot.exe" -WorkingDirectory "C:\WindowsPilot\app"
 $pr = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\<user>" -LogonType Interactive
-$se = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew
-Register-ScheduledTask -TaskName WindowsPilot -Action $a -Principal $pr -Settings $se -Trigger (New-ScheduledTaskTrigger -AtStartup)
+# AtStartup alone misses autologon sessions (token not ready); the logon
+# trigger + StartWhenAvailable + RestartCount make the pilot survive reboots.
+$se = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -StartWhenAvailable -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName WindowsPilot -Action $a -Principal $pr -Settings $se -Trigger @(New-ScheduledTaskTrigger -AtStartup; New-ScheduledTaskTrigger -AtLogOn)
 ```
 
 Config: `%LOCALAPPDATA%\WindowsPilot\pilot.json` (snake_case — see
@@ -115,3 +120,16 @@ python tests/windowspilot_smoke.py --base http://<vm>:8791 [--token ***] [--only
 
 All three exercise the same governed seam the agents use (launch/type/click/
 kill through `/api/act` jobs, findings through `/api/find`).
+
+## Governance rig
+
+`tests/windowspilot_rig.py` is the deeper contract check (24 assertions: arm
+state machine, panic hotkey, verify bundles with before/after shots, audit
+trail, coordinate clicks, MCP `tools/list` + `tools/call` with structured
+errors, console serving). It needs a **rig-profile** target
+(`PILOT_RIG=1` or `governance.allow_mcp_arm: true` in `pilot.json`) since it
+exercises `/api/arm` directly:
+
+```
+python tests/windowspilot_rig.py --base http://<vm>:8791 --token ***
+```
