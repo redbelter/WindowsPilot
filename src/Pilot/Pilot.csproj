@@ -4,13 +4,17 @@
     <!-- Windows-targeted TFM: Win32 interop + (later) WinRT WGC capture -->
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <!-- GUI subsystem: a console-subsystem exe launched from a scheduled task
+         allocates a console that Windows Terminal adopts as a visible window.
+         Logging goes to pilot.log (FileLoggerProvider), never stdout. -->
+    <OutputType>WinExe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>WindowsPilot</AssemblyName>
     <RootNamespace>WindowsPilot</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <Version>0.1.3-parity</Version>
+    <Version>0.1.4-windowless</Version>
   </PropertyGroup>
 
   <ItemGroup>

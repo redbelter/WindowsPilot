@@ -79,6 +79,7 @@ public sealed class PilotSettings
     static string Default() => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WindowsPilot");
 
+    public string LogFile => Path.Combine(DataDir, "pilot.log");
     public string AuditDir => Path.Combine(DataDir, "audit");
     public string ShotsDir => Path.Combine(DataDir, "shots");
     public string TokensFile => Path.Combine(DataDir, "tokens.json");

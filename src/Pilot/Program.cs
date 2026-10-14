@@ -16,11 +16,14 @@ var builder = WebApplication.CreateBuilder(args);
 // WindowsPilot runs as a LOGON SCHEDULED TASK in the user's interactive
 // session — deliberately NOT UseWindowsService (Session 0 = UIA-blind;
 // design §14, the single most important install rule).
-builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
-
+// GUI-subsystem exe: no console window exists to hold stdout, so the log
+// lives in <DataDir>\pilot.log.
 PilotSettings cfg;
-using (var bootFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddConsole()))
-    cfg = PilotSettings.Load(bootFactory.CreateLogger("pilot.config"));
+cfg = PilotSettings.Load(Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+// GUI-subsystem exe: no console window exists to hold stdout, so the log
+// lives in <DataDir>\pilot.log (config data_dir aware).
+builder.Logging.AddProvider(new FileLoggerProvider(cfg.LogFile));
+builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.AddSingleton(cfg);
 builder.WebHost.UseUrls($"{(cfg.Bind == "loopback" ? "http://127.0.0.1" : "http://0.0.0.0")}:{cfg.Port}");
