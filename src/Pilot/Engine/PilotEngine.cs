@@ -54,11 +54,21 @@ public sealed class PilotEngine(
             kill_trips = kill.Trips, dropped_inputs = kill.DroppedInputs,
             refs = Registry.Count,
             session = new { id = session, active_console = active, interactive = session == active },
+            // input-lane health: SendInput can report success while NOTHING is
+            // consumed (wedged desktop). input.ok=false => reboot the box;
+            // don't trust act results or retry them. See SessionInfo.InputHealth.
+            input = InputLaneReport(),
             monitors = mons,
             capture_tier = cfg.Capture.Prefer,
             foreground = fgTitle,
             enabled_tools = ToolSurface.Names,
         };
+    }
+
+    static object InputLaneReport()
+    {
+        var (ok, why, lastInputS) = SessionInfo.InputHealth();
+        return new { ok, why, last_input_s = lastInputS };
     }
 
     // ============================ reads ============================

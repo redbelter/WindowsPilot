@@ -189,6 +189,12 @@ public static class Native
     [DllImport("user32.dll")]
     public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LASTINPUTINFO { public uint cbSize; public uint dwLastInputInfo; }
+    [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+    [DllImport("kernel32.dll")] public static extern ulong GetTickCount64();
+    [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT pt);
+
     // ------------------------------------------------------------ keyboard map
 
     [DllImport("user32.dll")] public static extern IntPtr GetKeyboardLayout(uint thread);
@@ -279,6 +285,24 @@ public static class Native
     public const int GWL_STYLE = -16, WS_VISIBLE = 0x10000000;
     [DllImport("kernel32.dll")] public static extern uint GetTickCount();
     [DllImport("kernel32.dll")] public static extern void Sleep(uint ms);
+
+    // ------------------------------------------------------- input desktop
+    // Wedged-input detection (design: fleet health). After certain foreground
+    // churn a guest can end up with NO usable input desktop: SendInput returns
+    // success but no app ever consumes it, GetForegroundWindow() == IntPtr.Zero
+    // (the "Idle" process holds it), and OpenInputDesktop names something other
+    // than "Default" (or the name read fails). Only a guest reboot cures it.
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr OpenInputDesktop(uint dwFlags, bool fInherit, uint dwDesiredAccess);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool CloseDesktop(IntPtr hDesktop);
+    // NOTE byte[] not StringBuilder: the LPWStr copy-back into a StringBuilder
+    // silently yields "" (observed live: returns true, need=12, buffer empty).
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetUserObjectInformationW(IntPtr hObj, int nIndex,
+        byte[] pvInfo, uint nLength, out uint lpnLengthNeeded);
+    public const uint DESKTOP_READOBJECTS = 0x0001;
+    public const int UOI_NAME = 1;
 }
 
 /// <summary>Snapshot of the active-desktop info reported by /api/status.</summary>
@@ -291,4 +315,40 @@ public static class SessionInfo
     }
 
     public static bool IsInteractive => Current().session == Current().activeConsole && Current().session != 0;
+
+    /// <summary>
+    /// Input-lane health (design §14 companion). Gates on the ONE reliably
+    /// measured wedge signature: GetForegroundWindow()==IntPtr.Zero — the
+    /// "Idle" process holds the foreground and no app receives input (seen
+    /// live after long uptime + foreground churn; only a reboot cures it).
+    /// input.ok=false => reboot the box; act results are lying, don't retry.
+    ///
+    /// NOT gated on these, all measured live and rejected:
+    ///  * input-desktop NAME: in-session reads are privilege-blocked
+    ///    (need=12, zero buffer, err 203) — always empty, useless.
+    ///  * SendInput-ack probe (zero-motion move + GetLastInputInfo): Server
+    ///    2025 never advances dwLastInputInfo for SYNTHETIC mouse input —
+    ///    not even a real +2px absolute move — while apps consumed clicks
+    ///    perfectly fine. False "wedged" on a healthy box. Worst of all.
+    ///  * variant (b) of the wedge — real fg window, acts 'ok', NOTHING
+    ///    consumed — is INVISIBLE to any cheap status check. Only
+    ///    consumption-style tests catch it (smoke calculator re-presses
+    ///    until the display changes); run the suite, don't trust 'ok'.
+    /// last_input_s: seconds since the desktop's last INPUT event, for
+    /// humans only (synthetic injection may not advance it on Server SKUs).
+    /// </summary>
+    public static (bool ok, string why, double last_input_s) InputHealth()
+    {
+        try
+        {
+            var lii = new Native.LASTINPUTINFO { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.LASTINPUTINFO>() };
+            double lastS = -1;
+            if (Native.GetLastInputInfo(ref lii))
+                lastS = (Native.GetTickCount() - lii.dwLastInputInfo) / 1000.0;   // uint wrap is fine for a human field
+            if (Native.GetForegroundWindow() == IntPtr.Zero)
+                return (false, "no_foreground_window", lastS);
+            return (true, "", lastS);
+        }
+        catch (Exception e) { return (false, "probe_exception:" + e.GetType().Name, -1); }
+    }
 }
