@@ -18,10 +18,18 @@ CSS vars match the app theme when embedded; standalone keeps its own defaults.
 #bar select,#bar input,#bar button{background:#0e1216;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
 #stop{background:var(--acc);border:0;color:#fff;font-weight:700;border-radius:6px;padding:6px 14px;cursor:pointer}
 #armBtn{cursor:pointer}
-#tabs{display:flex;gap:4px;padding:8px 14px 0;border-bottom:1px solid var(--line)}
-#tabs button{background:none;border:1px solid transparent;border-bottom:0;color:var(--mut);padding:9px 16px;border-radius:9px 9px 0 0;cursor:pointer;font-size:14px}
-#tabs button.on{background:var(--panel);border-color:var(--line);color:var(--fg);font-weight:600}
-main{padding:14px}
+#tabs{display:none}
+/* cockpit grid — every zone visible at once: screen left, inspect right, operator wide, activity+status below */
+main{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(320px,1fr);gap:14px;padding:14px;align-content:start}
+main>section{display:block;min-width:0}
+main section:before{display:block;content:attr(data-zone);font-size:11px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase;margin-bottom:6px}
+#paneScreen{grid-area:1/1/2/2}
+#paneInspect{grid-area:1/2/2/3}
+#paneOperator{grid-area:2/1/3/3}
+#paneAudit{grid-area:3/1/4/2}
+#paneTarget{grid-area:3/2/4/3}
+@media(max-width:920px){main{grid-template-columns:1fr}main section{grid-area:auto}}
+.opgrid{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .pill{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--mut)}
 .pill.act{color:var(--acc);border-color:var(--acc)}
 .pill.drive{color:var(--warn);border-color:var(--warn)}
@@ -84,7 +92,7 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
   <button id="stop" title="panic: disarm + drop queued input">STOP ■</button>
   <input id="tok" type="password" size="14" placeholder="paste token" title="paste token; stored in this browser only">
 </div>
-<div id="help">This console shows one Windows VM: <b>Screen</b> = live picture, <b>Inspect</b> = its UI elements, <b>Operator</b> = click/type by hand, <b>Audit</b> = history of every action, <b>Target</b> = machine stats. Buttons go live once armed — <b>STOP</b> hands control back instantly.<span style="float:right"><button id="helpX" title="hide this hint">×</button></span></div>
+<div id="help">One view: watch the <b>screen</b> left, pick elements right, act from the boxes below — every action lands in <b>Activity</b> with screenshots. STOP hands control back instantly.<span style="float:right"><button id="helpX" title="hide this hint">×</button></span></div>
 <div id="tabs">
   <button data-tab="screen" class="on" title="live screenshot of the VM screen">Screen</button>
   <button data-tab="inspect">Inspect</button>
@@ -93,7 +101,7 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
   <button data-tab="target">Target</button>
 </div>
 <main>
-  <section id="paneScreen">
+  <section id="paneScreen" data-zone="Screen — live VM desktop">
     <div id="scrCtl">
       <label class="chk"><input type="checkbox" id="ckMarks"> marks snapshot</label>
       <button id="marksBtn" title="grab a fresh marks screenshot; boxes + clickable chips appear">marks ▸</button>
@@ -106,7 +114,7 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
     <div id="scrWrap"><canvas id="scr" width="1280" height="720"></canvas><canvas id="ovl" width="1280" height="720"></canvas></div>
   </section>
 
-  <section id="paneInspect" hidden>
+  <section id="paneInspect" hidden data-zone="Inspect — click a row, or crosshair-click the screen">
     <div id="scrCtl">
       <button id="rescan">rescan tree</button>
       <button id="pick" title="next click on the screen canvas selects that element">crosshair</button>
@@ -118,7 +126,7 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
     </div>
   </section>
 
-  <section id="paneOperator" hidden>
+  <section id="paneOperator" hidden data-zone="Operator — act on selection or coordinates">
     <div class="opgrid">
       <fieldset class="op"><legend>launch / kill</legend>
         <input id="opCmd" placeholder="cmd (notepad.exe)" size="16"><input id="opArgs" placeholder="args" size="10"><input id="opWdir" placeholder="workdir" size="10">
@@ -149,7 +157,7 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
     <hr style="border-color:var(--line)">
     <div id="ops">agent actions will appear here (audit feed, both hosts)</div>
   </section>
-  <section id="paneAudit" hidden>
+  <section id="paneAudit" hidden data-zone="Activity — every action, both hosts">
     <div id="scrCtl">
       <button id="auditRefresh">refresh</button>
       <input id="auditFilter" placeholder="filter by tool" size="16">
@@ -157,11 +165,32 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
     </div>
     <div id="audit"></div>
   </section>
-  <section id="paneTarget" hidden><div id="target"><pre id="tgt">loading…</pre></div></section>
+  <section id="paneTarget" hidden data-zone="Status"><div id="target"><pre id="tgt">loading…</pre></div></section>
 </main>
 <div id="log"></div>
 <div id="lightbox"><img id="lbImg"></div>
 
-<script src="/app.js?v=6"></script>
+<script src="/app.js?v=7"></script>
+<script>
+// cockpit bootstrap — all zones visible from the start, feeds hydrate without clicks
+document.querySelectorAll('main section').forEach(function (s) { s.hidden = false; });
+try { rescan(); } catch (e) { }
+try { opsRefresh(); } catch (e) { }
+try { auditRefresh(); } catch (e) { }
+try { targetRefresh(); } catch (e) { }
+setInterval(function () { try { opsRefresh(); auditRefresh(); } catch (e) { } }, 15000);
+
+// crosshair pick stays in place — no pane switch
+pickAt = async function (e) {
+  $('#pick').dataset.on = '0'; $('#pick').style.background = '';
+  const p = physFromEvent(e);
+  try {
+    const n = await api('/element_at?x=' + p.x + '&y=' + p.y);
+    if (!treeLoaded) await rescan();
+    selRef = n.ref;
+    select(treeNodes.find(function (t) { return t.ref === n.ref; }) || n);
+  } catch (err) { logLine('pick: ' + err.message); }
+};
+</script>
 </body>
 </html>
