@@ -228,7 +228,7 @@ async function select(n) {
     for (const b of $('#props').querySelectorAll('.pbtn')) b.onclick = async () => {
       try {
         const P = b.dataset.p;
-        if (P === 'typetarget') { $('#opText').focus(); $('#opText').placeholder = 'type into ' + n.ref; $('#paneOperator').hidden = false; for (const x of document.querySelectorAll('#tabs button')) { x.classList.toggle('on', x.dataset.tab === 'operator'); } for (const s of document.querySelectorAll('main section')) s.hidden = s.id !== 'paneOperator'; return; }
+        if (P === 'typetarget') { $('#opText').focus(); $('#opText').placeholder = 'type into ' + n.ref; if (window.showRightPane) showRightPane('paneOperator'); else $('#paneOperator').scrollIntoView({ behavior: 'smooth' }); return; }
         if (P === 'value') {
           const v = prompt('new value'); if (v === null) return;
           await job('value', { req: n.ref, value: v, verify: true });
