@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WindowsPilot layout variants</title>
+<style>
+:root{--bg:#0b0d10;--panel:#12161b;--line:#222933;--fg:#e6e9ee;--mut:#8a93a0;--acc:#f43f5e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 "Segoe UI",system-ui,sans-serif;padding:28px}
+h1{font-size:20px;margin:0 0 4px}p.sub{color:var(--mut);margin:0 0 20px;font-size:13px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+a.card{display:block;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;text-decoration:none;color:inherit}
+a.card:hover{border-color:var(--acc)}
+a.card b{display:block;font-size:15px;margin-bottom:4px}
+a.card span{color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<h1>WindowsPilot console — layout variants</h1>
+<p class="sub">Same data, same live feed, five layouts. Open one per tab, compare, say which number.</p>
+<div class="cards">
+<a class="card" href="/v1.html"><b>1 · Single-row header</b><span>Status pills, tabs and buttons share one slim strip. Maximum vertical space for content.</span></a>
+<a class="card" href="/v2.html"><b>2 · Screen-first split</b><span>Live screen pinned left; tree / operator / audit docked right. No tab-hopping.</span></a>
+<a class="card" href="/v3.html"><b>3 · Merged Activity timeline</b><span>One timeline with inline screenshots replaces Operator + Audit tabs. Fewer tabs, same history.</span></a>
+<a class="card" href="/v4.html"><b>4 · Filmstrip</b><span>Screenshot strip under the canvas with time ticks — scrub an agent run by frame.</span></a>
+<a class="card" href="/v5.html"><b>5 · Hover pills, 4 tabs</b><span>Target tab folded into hover-expanding header pills. One less tab.</span></a>
+</div>
+</body>
+</html>
