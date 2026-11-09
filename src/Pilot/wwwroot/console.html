@@ -12,17 +12,17 @@ CSS vars match the app theme when embedded; standalone keeps its own defaults.
 <title>WindowsPilot</title>
 <style>
 :root{--bg:#0b0d10;--panel:#12161b;--line:#222933;--fg:#e6e9ee;--mut:#8a93a0;--acc:#f43f5e;--ok:#22c55e;--warn:#f59e0b}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Segoe UI",system-ui,sans-serif;height:100%}
-#bar{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 "Segoe UI",system-ui,sans-serif;height:100%}
+#bar{display:flex;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
 #bar .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
 #bar select,#bar input,#bar button{background:#0e1216;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
 #stop{background:var(--acc);border:0;color:#fff;font-weight:700;border-radius:6px;padding:6px 14px;cursor:pointer}
 #armBtn{cursor:pointer}
-#tabs{display:flex;gap:2px;padding:6px 12px 0;border-bottom:1px solid var(--line)}
-#tabs button{background:none;border:1px solid transparent;border-bottom:0;color:var(--mut);padding:6px 12px;border-radius:8px 8px 0 0;cursor:pointer}
-#tabs button.on{background:var(--panel);border-color:var(--line);color:var(--fg)}
-main{padding:12px}
-.pill{font-size:11px;border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--mut)}
+#tabs{display:flex;gap:4px;padding:8px 14px 0;border-bottom:1px solid var(--line)}
+#tabs button{background:none;border:1px solid transparent;border-bottom:0;color:var(--mut);padding:9px 16px;border-radius:9px 9px 0 0;cursor:pointer;font-size:14px}
+#tabs button.on{background:var(--panel);border-color:var(--line);color:var(--fg);font-weight:600}
+main{padding:14px}
+.pill{font-size:12px;border:1px solid var(--line);border-radius:99px;padding:3px 10px;color:var(--mut)}
 .pill.act{color:var(--acc);border-color:var(--acc)}
 .pill.drive{color:var(--warn);border-color:var(--warn)}
 #log{border-top:1px solid var(--line);max-height:120px;overflow:auto;font:11px/1.5 ui-monospace,Consolas;padding:6px 12px;color:var(--mut)}
@@ -162,6 +162,6 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
 <div id="log"></div>
 <div id="lightbox"><img id="lbImg"></div>
 
-<script src="/app.js"></script>
+<script src="/app.js?v=6"></script>
 </body>
 </html>
