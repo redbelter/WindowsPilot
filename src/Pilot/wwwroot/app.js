@@ -4,9 +4,19 @@
 
 const $ = s => document.querySelector(s);
 const tokEl = $('#tok');
-let TOKEN = localStorage.getItem('pilot_tok') || '';
+// token bootstrap: ?token= in URL wins (one-click links), else localStorage.
+let TOKEN = new URLSearchParams(location.search).get('token') || localStorage.getItem('pilot_tok') || '';
+if (TOKEN) localStorage.setItem('pilot_tok', TOKEN);
 tokEl.value = TOKEN;
 tokEl.onchange = () => { TOKEN = tokEl.value.trim(); localStorage.setItem('pilot_tok', TOKEN); status(); };
+
+// dismissible intro strip
+(function(){
+  const help = $('#help'); if (!help) return;
+  if (localStorage.getItem('pilot_help_off')) help.remove();
+  const x = $('#helpX');
+  if (x) x.onclick = () => { help.remove(); localStorage.setItem('pilot_help_off','1'); };
+})();
 
 // ---------- tiny api helper (hyperv dashboard pattern: {ok,data} | Err) ----
 async function api(path, body) {
@@ -34,12 +44,13 @@ async function status() {
   try {
     const s = await api('/status');
     armed = s.armed;
-    $('#hostPill').textContent = `${s.session.interactive ? 'session ' + s.session.id : 'NO-SESSION!'}`;
-    $('#armPill').textContent = armed + (s.arm_expires ? ' ⏱' : '');
+    $('#hostPill').textContent = s.session.interactive ? 'session ' + s.session.id + ' · live' : 'NOT LOGGED IN';
+    $('#armPill').textContent = armed === 'read' ? 'read-only' : armed === 'act' ? 'armed: act' : armed === 'drive' ? 'armed: drive' : armed || 'read-only';
     $('#armPill').className = 'pill' + (armed === 'act' ? ' act' : armed === 'drive' ? ' drive' : '');
-    $('#tierPill').textContent = 'tier:' + s.capture_tier;
+    $('#tierPill').textContent = 'capture: ' + s.capture_tier;
     $('#stateDot').style.background = s.session.interactive ? 'var(--ok)' : 'var(--acc)';
     document.title = `[${armed}] WindowsPilot`;
+    $('#armBtn').textContent = armed === 'read' ? 'ARM ▾' : 'DISARM ▾';
   } catch (e) {
     $('#hostPill').textContent = e.message.slice(0, 30);
   }
@@ -272,7 +283,7 @@ async function opsRefresh() {
     if (shots.children.length) d.appendChild(shots);
     el.appendChild(d);
   }
-  if (!el.children.length) el.textContent = 'no agent actions yet (host=mcp)';
+  if (!el.children.length) el.textContent = 'No actions yet — use the boxes above, or an agent drives the VM and its steps show up here.';
 }
 $('#lightbox').onclick = () => $('#lightbox').style.display = 'none';
 

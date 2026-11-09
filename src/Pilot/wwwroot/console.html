@@ -12,7 +12,7 @@ CSS vars match the app theme when embedded; standalone keeps its own defaults.
 <title>WindowsPilot</title>
 <style>
 :root{--bg:#0b0d10;--panel:#12161b;--line:#222933;--fg:#e6e9ee;--mut:#8a93a0;--acc:#f43f5e;--ok:#22c55e;--warn:#f59e0b}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.45 "Segoe UI",system-ui,sans-serif;height:100%}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 "Segoe UI",system-ui,sans-serif;height:100%}
 #bar{display:flex;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
 #bar .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
 #bar select,#bar input,#bar button{background:#0e1216;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
@@ -66,6 +66,9 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
 #lightbox{position:fixed;inset:0;background:#000c;display:none;align-items:center;justify-content:center;z-index:50}
 #lightbox img{max-width:95%;max-height:95%}
 .warn{color:var(--warn)}
+#help{padding:7px 12px;font-size:12px;color:var(--mut);background:#0e1216;border-bottom:1px solid var(--line)}
+#help b{color:var(--fg)}
+#helpX{background:none;border:0;color:var(--mut);cursor:pointer;font-size:14px;padding:0 4px}
 </style>
 </head>
 <body>
@@ -76,13 +79,14 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
   <span id="armPill" class="pill">read</span>
   <span id="tierPill" class="pill">tier:?</span>
   <span style="flex:1"></span>
-  <button id="armBtn" title="arm injection scope">ARM: act ▾</button>
+  <button id="armBtn" title="allow the agent to click and type">ARM ▾</button>
   <button id="driveBtn" class="pill" title="take manual control (mutually exclusive with agent act)">DRIVE</button>
   <button id="stop" title="panic: disarm + drop queued input">STOP ■</button>
-  <input id="tok" type="password" size="14" placeholder="token (act)" title="paste tokens.json act-token; stored in this browser only">
+  <input id="tok" type="password" size="14" placeholder="paste token" title="paste token; stored in this browser only">
 </div>
+<div id="help">This console shows one Windows VM: <b>Screen</b> = live picture, <b>Inspect</b> = its UI elements, <b>Operator</b> = click/type by hand, <b>Audit</b> = history of every action, <b>Target</b> = machine stats. Buttons go live once armed — <b>STOP</b> hands control back instantly.<span style="float:right"><button id="helpX" title="hide this hint">×</button></span></div>
 <div id="tabs">
-  <button data-tab="screen" class="on">Screen</button>
+  <button data-tab="screen" class="on" title="live screenshot of the VM screen">Screen</button>
   <button data-tab="inspect">Inspect</button>
   <button data-tab="operator">Operator</button>
   <button data-tab="audit">Audit</button>
