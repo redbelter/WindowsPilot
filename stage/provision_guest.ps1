@@ -1,4 +1,10 @@
+# Thin shim over prov_local.ps1 — the canonical provisioner (single source of
+# truth: bare-exe task, AtStartup+AtLogOn, StartWhenAvailable+RestartCount).
+# Dot-source when nearby; everything below is the single-file fallback.
 $ErrorActionPreference = "Continue"
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$canon = Join-Path $here "prov_local.ps1"
+if (Test-Path $canon) { . $canon; exit }
 $log = "C:\prov.log"
 function P($m) { ("{0} {1}" -f (Get-Date -Format "HH:mm:ss"), $m) | Add-Content $log }
 if (Test-Path C:\prov.done) { Unregister-ScheduledTask -TaskName ProvOnce -Confirm:$false -ErrorAction SilentlyContinue; exit 0 }
@@ -45,13 +51,15 @@ Set-Content -Path (Join-Path $dir "pilot.json") -Value $cfg -Encoding UTF8
 Set-Content -Path (Join-Path $dir "tokens.json") -Value (ConvertTo-Json @{ "act-rig-1" = "act"; "ro-rig-1" = "ro"; "drive-rig-1" = "drive" }) -Encoding ASCII
 P "CFG_WRITTEN"
 
-# 6) session-1 task with boot trigger (survives reboots)
+# 6) session-1 task: bare exe (WinExe — never allocates a console), boot+logon
+# triggers, StartWhenAvailable + restarts so it survives reboots. Mirrors the
+# canonical task shape in prov_local.ps1.
 $hn = $env:COMPUTERNAME
 Unregister-ScheduledTask -TaskName WindowsPilot -Confirm:$false -ErrorAction SilentlyContinue
-$act = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c C:\WindowsPilot\app\WindowsPilot.exe >> C:\WindowsPilot\pilot.log 2>&1" -WorkingDirectory "C:\WindowsPilot\app"
+$act = New-ScheduledTaskAction -Execute "C:\WindowsPilot\app\WindowsPilot.exe" -WorkingDirectory "C:\WindowsPilot\app"
 $pri = New-ScheduledTaskPrincipal -UserId ($hn + "\Sandbox") -LogonType Interactive
-$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew
-$t1 = New-ScheduledTaskTrigger -AtStartup
+$set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$t1 = @(New-ScheduledTaskTrigger -AtStartup; New-ScheduledTaskTrigger -AtLogOn)
 Register-ScheduledTask -TaskName WindowsPilot -Action $act -Principal $pri -Settings $set -Trigger $t1 | Out-Null
 Start-ScheduledTask -TaskName WindowsPilot
 P "PILOT=started"

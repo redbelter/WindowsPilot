@@ -63,8 +63,11 @@ def act(tool, timeout_s=90, **args):
         raise RuntimeError(f"{tool} rejected: {json.dumps(j)[:200]}")
     jid = j["job"]
     deadline = time.time() + timeout_s
+    first = True
     while time.time() < deadline:
-        time.sleep(0.3)
+        if not first:
+            time.sleep(0.3)                      # fast jobs answer on the first poll
+        first = False
         j = api("/api/job?id=" + urllib.parse.quote(jid))
         j = j.get("data", j)
         if j.get("status") == "done":

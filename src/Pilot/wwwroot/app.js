@@ -99,13 +99,22 @@ for (const b of document.querySelectorAll('#tabs button'))
 // ---------- arm / stop / drive ----------------------------------------------
 $('#stop').onclick = async () => { try { await api('/panic', {}); } catch (e) { logLine('panic failed ' + e.message); } };
 async function logLine(m) { const el = $('#log'); const d = document.createElement('div'); d.textContent = m; el.appendChild(d); }
+// toast: non-blocking error surface (toast() steals focus and stacks modally)
+function toast(m, bad) {
+  let t = document.getElementById('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast';
+    t.style.cssText = 'position:fixed;left:14px;bottom:14px;z-index:9;max-width:60vw;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font-size:13px;opacity:0;transition:opacity .25s';
+    document.body.appendChild(t); }
+  t.textContent = m; t.style.borderColor = bad ? 'var(--warn)' : 'var(--acc)'; t.style.opacity = '1';
+  clearTimeout(toast._h); toast._h = setTimeout(() => { t.style.opacity = '0'; }, 4000);
+}
 
 $('#armBtn').onclick = async () => {
   try {
     const scope = armed === 'act' ? 'read' : 'act';   // toggle
     const info = await api('/arm', { scope, ttl_min: 15, why: 'console' });
     armed = info.armed; status();
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message); }
 };
 $('#driveBtn').onclick = () => { $('#ckDrive').click(); };
 
@@ -124,7 +133,6 @@ function connectView() {
     }
     lastFrameAt = Date.now();
     frames++;
-    $('#fpsPill').textContent = 'frames: ' + frames;
     pendingBlob = new Blob([ev.data], { type: 'image/jpeg' });   // replace-not-stack
     if (!rafArmed) { rafArmed = true; requestAnimationFrame(drawLatest); }
   };
@@ -134,6 +142,12 @@ function connectView() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { try { ws.close(); } catch (e) { } } });
 }
 let backNs = 1000;
+// staleness signal: a frozen frame must not look alive — pill carries frame age
+setInterval(() => {
+  const age = (Date.now() - lastFrameAt) / 1000;
+  const p = $('#fpsPill'); if (!p) return;
+  p.textContent = 'frames: ' + frames + (age > 6 ? ' · stale ' + age.toFixed(0) + 's' : '');
+}, 2000);
 function backoff() { const b = Math.min(10000, backNs) * (0.8 + Math.random() * 0.4); backNs = Math.min(10000, backNs * 1.5); return b | 0; }
 function drawLatest() {
   rafArmed = false;
@@ -261,7 +275,7 @@ async function select(n) {
         else if (P === 'click') await job('click', { req: n.ref, verify: true });
         else await job(P, { req: n.ref, verify: true });
         rescan();
-      } catch (e) { alert(e.message); }
+      } catch (e) { toast(e.message); }
     };
   } catch (e) { $('#props').textContent = e.message; }
 }
@@ -349,7 +363,7 @@ async function marksSnapshot() {
     img.src = s.image_url + '?token=' + encodeURIComponent(TOKEN);
     renderChips();
     logLine('marks: ' + lastMarks.length + (s.empty_marks_hint ? ' (' + s.empty_marks_hint + ')' : ''));
-  } catch (e) { alert('marks: ' + e.message); }
+  } catch (e) { toast('marks: ' + e.message); }
 }
 function renderChips() {
   const el = $('#markChips'); el.innerHTML = '';
@@ -360,7 +374,7 @@ function renderChips() {
     b.onmouseenter = () => drawMarkBox(m);
     b.onclick = async () => {
       try { await job('click', { mark: m.n, verify: true }); logLine('clicked mark ' + m.n + ' (' + m.ref + ')'); }
-      catch (e) { alert(e.message); }
+      catch (e) { toast(e.message); }
     };
     el.appendChild(b);
   }
@@ -379,7 +393,7 @@ $('#snapBtn').onclick = async () => {
   try {
     const s = await api('/screenshot', { marks: $('#ckMarks').checked, max_edge: 3840, quality: 92 });
     window.open(s.image_url + '?token=' + encodeURIComponent(TOKEN), '_blank');
-  } catch (e) { alert(e.message); }
+  } catch (e) { toast(e.message); }
 };
 
 // ---------- operator act console (full engine surface) ----------------------
@@ -425,7 +439,7 @@ document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
     opsRefresh();
   } catch (e) {
     $('#waitPill').textContent = '';
-    alert(T + ': ' + e.message);
+    toast(T + ': ' + e.message);
   }
 });
 // ref-carrying ops: type/click/value reuse the inspected ref
@@ -441,7 +455,7 @@ $('#ckDrive').onchange = async e => {
   $('#driveLock').hidden = !driveOn;
   if (!driveOn) { if (dws) dws.close(); return; }
   try { await api('/arm', { scope: 'drive', ttl_min: 15, why: 'console-drive' }); status(); connectDrive(); }
-  catch (err) { alert('drive arm failed: ' + err.message); $('#ckDrive').checked = false; driveOn = false; $('#driveLock').hidden = true; }
+  catch (err) { toast('drive arm failed: ' + err.message); $('#ckDrive').checked = false; driveOn = false; $('#driveLock').hidden = true; }
 };
 
 window.addEventListener('error', e => logLine('js: ' + e.message));
