@@ -29,6 +29,7 @@ Key contracts:
   with a fingerprint, never silently guess.
 - **DPI contract** — process is PerMonitorV2; every frame carries
   `{width, height, origin, scale}`; device pixels everywhere on the wire.
+- **Responses** — every `/api/*` reply rides the `{ok,data}` envelope (errors: `{ok:false,error,msg,hint}` with retry flag); clients unwrap once, per-route shapes never differ.
 - **Governance state machine** — `DISARMED → ARMED(read|act|drive)`; `drive`
   (human raw-input mode) is mutually exclusive with agent actuation.
   Panic: `Ctrl+Alt+Pause` hotkey or `/api/panic`.
@@ -81,8 +82,8 @@ or `?token=<token>`.
 | `GET /api/tree?ref=` · `/api/find` · `/api/element?ref=` | actionable-first UIA |
 | `POST /api/screenshot` | `marks: true` → set-of-marks overlay |
 | `GET /api/shots/{id}` | captured JPEG |
-| `POST /api/act` | single verb: click/type/set_value/keypress/scroll/check/uncheck/toggle/invoke/expand/collapse/select/focus/launch/wait/click_mark/arm/disarm/panic/hold_mouse/... |
-| `POST /api/jobs` | `{steps:[...]}` sequential action scripts (kill-switch honored between steps) |
+| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/toggle/expand/select/launch/kill/wait; replies `{ok,data:{job:"<id>"}}` |
+| `GET /api/jobs` · `/api/job?id=` | job list / single job (hyperv dashboard shape) |
 | `POST /api/wait` | server-side conditions: element/window/foreground/focused/text/pixel/action_settled |
 | `GET /api/audit` | JSONL audit tail (`csv=1` for export) |
 | `GET /ws/view` | live frame WebSocket |
@@ -92,7 +93,7 @@ governance, error taxonomy, performance budgets).
 
 ## Verified
 
-End-to-end rig against a Hyper-V Server-2025 guest: **24/24** — status,
+End-to-end rig against a Hyper-V Server-2025 guest: **29/29** — status,
 arm/act scopes, launch+find Notepad, UIA value write read back
 (`HELLO-PILOT-42`), coordinate click, screenshot marks, `stale_ref`
 self-heal, panic hotkey, MCP `tools/call` with structured errors, audit
@@ -123,7 +124,7 @@ kill through `/api/act` jobs, findings through `/api/find`).
 
 ## Governance rig
 
-`tests/windowspilot_rig.py` is the deeper contract check (24 assertions: arm
+`tests/windowspilot_rig.py` is the deeper contract check (29 assertions: arm
 state machine, panic hotkey, verify bundles with before/after shots, audit
 trail, coordinate clicks, MCP `tools/list` + `tools/call` with structured
 errors, console serving). It needs a **rig-profile** target

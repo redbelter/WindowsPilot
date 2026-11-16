@@ -133,8 +133,8 @@ public static class PilotApi
             await Wrap(() => e.ScreenshotAsync(req.Monitor ?? 0, req.Marks ?? true, req.MaxEdge ?? 1568, req.Quality ?? 70, req.Hwnd)));
 
         api.MapGet("/events", (EventHub hub, long? since, int? max) =>
-            Results.Json(new { log = hub.Since(since ?? 0, max ?? 200)
-                .Select(e => new { n = e.N, t = e.T, m = e.Type + " " + JsonSerializer.Serialize(e.Detail), k = e.Type }), n = hub.SinceSeq }));
+            Results.Json(new { ok = true, data = new { log = hub.Since(since ?? 0, max ?? 200)
+                .Select(e => new { n = e.N, t = e.T, m = e.Type + " " + JsonSerializer.Serialize(e.Detail), k = e.Type }), n = hub.SinceSeq } }));
 
         // ---- mutations: single entry-point, hyperv job pattern ----
         api.MapPost("/act", (ActReq req, PilotEngine e, PilotJobStore jobs, HttpContext ctx) =>
@@ -162,36 +162,42 @@ public static class PilotApi
                 _ => throw new PilotException("not_found", $"unknown act tool '{req.Tool}'",
                     "click drag scroll type keys value invoke focus toggle expand select launch kill wait"),
             });
-            return Results.Json(new { job = jid });
+            return Results.Json(new { ok = true, data = new { job = jid } });
         });
 
         api.MapPost("/arm", async (ArmReq req, ArmState armState, AuditLog audit, HttpContext ctx) =>
         {
-            if (req.Scope == "read") return Results.Json(armState.Disarm("web"));
+            if (req.Scope == "read")
+                return await Wrap(() => Task.FromResult<object>(armState.Disarm("web")));
             return await Wrap(async () =>
             {
-                var info = armState.Arm(Enum.Parse<ArmScope>(req.Scope, true), req.TtlMin, req.Why ?? "web-console", allowMcpArm: false);
+                if (!Enum.TryParse<ArmScope>(req.Scope, true, out var sc))
+                    throw new PilotException("bad_request", $"unknown arm scope '{req.Scope}'",
+                        "scope: read | act | drive");
+                var info = armState.Arm(sc, req.TtlMin, req.Why ?? "web-console", allowMcpArm: false);
                 audit.Write(ctx.Ctx().Host, "act", "arm", new { req.Scope, req.TtlMin }, null, new { }, new { ok = true });
                 return await Task.FromResult<object>(info);
             });
         });
 
-        api.MapPost("/panic", (KillSwitch kill, ArmState armState, AuditLog audit) =>
-        {
-            kill.Trip("web-stop");
-            armState.Disarm("panic(web)");
-            audit.Write("web", "-", "panic", null, null, new { }, new { ok = true, trips = kill.Trips });
-            return Results.Json(new { ok = true, trips = kill.Trips, dropped = kill.DroppedInputs });
-        });
+        api.MapPost("/panic", async (KillSwitch kill, ArmState armState, AuditLog audit) =>
+            await Wrap(() =>
+            {
+                kill.Trip("web-stop");
+                armState.Disarm("panic(web)");
+                audit.Write("web", "-", "panic", null, null, new { }, new { ok = true, trips = kill.Trips });
+                return Task.FromResult<object>(new { trips = kill.Trips, dropped = kill.DroppedInputs });
+            }));
 
-        api.MapGet("/jobs", (PilotJobStore jobs) => Results.Json(new { jobs = jobs.Jobs() }));
+        api.MapGet("/jobs", (PilotJobStore jobs) => Results.Json(new { ok = true, data = new { jobs = jobs.Jobs() } }));
         api.MapGet("/job", (PilotJobStore jobs, string id) =>
-            jobs.Job(id) is { } j ? Results.Json(j) : Results.NotFound());
+            jobs.Job(id) is { } j ? Results.Json(new { ok = true, data = j })
+                : Results.Json(new Err { Error = "not_found", Msg = $"no job '{id}'" }, statusCode: 404));
 
         api.MapGet("/audit", (AuditLog a, long? since_seq, string? tool, string? host, int? limit) =>
         {
             var (items, n) = a.Tail(since_seq ?? 0, tool, host, limit ?? 50);
-            return Results.Json(new { items, n });
+            return Results.Json(new { ok = true, data = new { items, n } });
         });
 
         api.MapGet("/shots/{id}", (string id, PilotSettings cfg) =>
@@ -199,7 +205,9 @@ public static class PilotApi
             var leaf = Path.GetFileName(id);                                   // traversal-safe leaf only
             if (!leaf.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase)) leaf += ".jpg";   // id-or-filename both work
             var f = Path.Combine(cfg.ShotsDir, leaf);
-            return File.Exists(f) ? Results.File(f, "image/jpeg") : Results.NotFound();
+            return File.Exists(f)
+                ? Results.File(f, "image/jpeg")
+                : Results.Json(new Err { Error = "not_found", Msg = $"no shot '{leaf}'", Hint = "shots are pruned after audit.retain_days" }, statusCode: 404);
         });
 
         api.MapGet("/config", (PilotEngine e) => Results.Json(new { ok = true, data = e.RedactedConfig() }));
@@ -208,7 +216,7 @@ public static class PilotApi
         {
             var items = hub.Since(since ?? 0, 300)
                 .Select(e => new { n = e.N, t = e.T, m = e.Type, k = e.Type }).ToList();
-            return Results.Json(new { log = items, n = hub.SinceSeq });
+            return Results.Json(new { ok = true, data = new { log = items, n = hub.SinceSeq } });
         });
 
         return app;

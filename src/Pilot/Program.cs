@@ -47,8 +47,12 @@ builder.Services.AddMcpServer().WithHttpTransport().WithTools<PilotTools>();
 
 var app = builder.Build();
 
-app.Services.GetRequiredService<TokenStore>().LoadOrGenerate();
-app.Services.GetRequiredService<ArmState>().MaybeAutoArm();   // dev/rig auto_arm=startup (design §8.1)
+// These two run before app.Run(): with the GUI subsystem there is no console
+// to show a crash, so failures must reach pilot.log, not the void.
+try { app.Services.GetRequiredService<TokenStore>().LoadOrGenerate(); }
+catch (Exception e) { app.Logger.LogError("token store init failed: {Err}", e.Message); }
+try { app.Services.GetRequiredService<ArmState>().MaybeAutoArm(); }   // dev/rig auto_arm=startup (design §8.1)
+catch (Exception e) { app.Logger.LogError("auto-arm init failed: {Err}", e.Message); }
 
 // LOUD banner: LAN bind + no TLS is rig/dev territory (design §13)
 if (cfg.Bind != "loopback")

@@ -10,7 +10,7 @@ namespace WindowsPilot.Engine.Input;
 /// SendInput is process-global and interleaved injections scramble gestures.
 /// The kill switch is checked between EVERY individual SendInput event.
 /// </summary>
-public sealed class InputInjector(KillSwitch kill, EventHub events, ILogger<InputInjector> log)
+public sealed class InputInjector(KillSwitch kill)
 {
     readonly SemaphoreSlim _mutex = new(1, 1);
     public string Holder { get; private set; } = "";

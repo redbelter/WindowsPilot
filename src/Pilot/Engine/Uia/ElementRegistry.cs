@@ -13,7 +13,7 @@ namespace WindowsPilot.Engine.Uia;
 /// A process-wide `generation` bumps on engine restart so long-running agent
 /// loops can detect "every ref you hold is dead" in one comparison.
 /// </summary>
-public sealed class ElementRegistry(ILogger<ElementRegistry> log)
+public sealed class ElementRegistry
 {
     public sealed class Entry
     {
@@ -25,7 +25,6 @@ public sealed class ElementRegistry(ILogger<ElementRegistry> log)
     }
 
     readonly ConcurrentDictionary<string, Entry> _byId = new();
-    int _next;
     TimeSpan _ttl = TimeSpan.FromMinutes(10);
 
     public long Generation { get; } = DateTime.UtcNow.Ticks;   // one per process lifetime

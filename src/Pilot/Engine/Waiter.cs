@@ -20,7 +20,7 @@ public sealed class WaitCondition
     public int ForMs { get; set; } = 800;             // pixel_stable / action_settled window
 }
 
-public sealed class Waiter(UiaService uia, EventHub events, ILogger log)
+public sealed class Waiter(UiaService uia, EventHub events)
 {
     public async Task<WaitForResult> WaitAsync(WaitCondition c, int timeoutS, int intervalMs)
     {
@@ -82,8 +82,8 @@ public sealed class Waiter(UiaService uia, EventHub events, ILogger log)
                 bool m = t.Title.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
                 if (!m)
                 {
-                    var proc = System.Diagnostics.Process.GetProcessById(t.Pid).ProcessName;
-                    m = proc.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+                    using var proc = System.Diagnostics.Process.GetProcessById(t.Pid);
+                    m = proc.ProcessName.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
                 }
                 if (m) return expect ? new NodeDto { Ref = "-", Name = t.Title } : null;
             }

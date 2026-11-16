@@ -18,7 +18,7 @@ public sealed record Frame(byte[] Jpeg, ShotMeta Meta);
 /// Coordinates picked in the image inverse-map to physical px via Meta
 /// (design §6). Encode + downscale with ImageSharp-free System.Drawing.
 /// </summary>
-public sealed class CaptureService(PilotSettings cfg, ILogger<CaptureService> log)
+public sealed class CaptureService(PilotSettings cfg)
 {
     static readonly ImageCodecInfo? JpegCodec = ImageCodecInfo.GetImageEncoders()
         .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);

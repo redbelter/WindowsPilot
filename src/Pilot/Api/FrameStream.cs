@@ -47,7 +47,7 @@ public sealed class FrameHub
 /// in flight or drive is held (design §4.3). Stillness via 8×8 phash skips
 /// re-encode churn when nothing moved (idle CPU budget ≤5 %, T-14).
 /// </summary>
-public sealed class FrameStreamService(CaptureService capture, PilotEngine engine,
+public sealed class FrameStreamService(CaptureService capture,
     FrameHub hub, ArmState arm, InputInjector input, PilotSettings cfg,
     ILogger<FrameStreamService> log) : BackgroundService
 {

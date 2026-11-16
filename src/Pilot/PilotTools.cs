@@ -19,7 +19,7 @@ namespace WindowsPilot;
 /// </summary>
 [McpServerToolType]
 public sealed class PilotTools(PilotEngine engine, ArmState arm, KillSwitch kill,
-    AuditLog audit, EventHub events, PilotSettings cfg, TokenStore tokens)
+    AuditLog audit, EventHub events, PilotSettings cfg)
 {
     static CallContext Cx() => new("mcp", "act");
 

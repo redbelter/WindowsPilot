@@ -88,7 +88,7 @@ public static class Native
         var wc = new WNDCLASSEX
         {
             cbSize = Marshal.SizeOf<WNDCLASSEX>(),
-            lpfnWndProc = WndProcThunk,
+            lpfnWndProc = WndProcThunk!,
             hInstance = hInst,
             lpszClassName = className,
         };
@@ -344,7 +344,7 @@ public static class SessionInfo
             var lii = new Native.LASTINPUTINFO { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.LASTINPUTINFO>() };
             double lastS = -1;
             if (Native.GetLastInputInfo(ref lii))
-                lastS = (Native.GetTickCount() - lii.dwLastInputInfo) / 1000.0;   // uint wrap is fine for a human field
+                lastS = ((double)Native.GetTickCount64() - lii.dwLastInputInfo) / 1000.0;   // 64-bit tick: no wrap at ~49.7 days
             if (Native.GetForegroundWindow() == IntPtr.Zero)
                 return (false, "no_foreground_window", lastS);
             return (true, "", lastS);

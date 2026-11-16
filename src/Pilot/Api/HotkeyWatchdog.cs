@@ -35,8 +35,16 @@ public sealed class HotkeyWatchdog(KillSwitch kill, ArmState arm, EventHub event
         // so the delegate must be rooted BEFORE RegisterWindowClass runs.
         Native.WndProcThunk = _proc = WndProc;
         Native.RegisterWindowClass("PilotHotkey");
-        _hwnd = Native.CreateWindowExW(0, "PilotHotkey", "pilot", 0, 0, 0, 0, 0,
-            Native.HWND_MESSAGE, IntPtr.Zero, Native.GetModuleHandleW(null), IntPtr.Zero);
+
+        // Window-class races and hotkey squats are most likely at logon-time
+        // startup — exactly when this thread starts. Retry briefly instead of
+        // living without the last-line-of-defense stop button.
+        for (int attempt = 0; attempt < 5 && _hwnd == IntPtr.Zero; attempt++)
+        {
+            if (attempt > 0) Native.Sleep(2000);
+            _hwnd = Native.CreateWindowExW(0, "PilotHotkey", "pilot", 0, 0, 0, 0, 0,
+                Native.HWND_MESSAGE, IntPtr.Zero, Native.GetModuleHandleW(null), IntPtr.Zero);
+        }
         if (_hwnd == IntPtr.Zero)
         {
             log.LogWarning("hotkey window failed — Ctrl+Alt+Pause unavailable");
@@ -48,6 +56,12 @@ public sealed class HotkeyWatchdog(KillSwitch kill, ArmState arm, EventHub event
         while (Native.GetMessageW(out var m, IntPtr.Zero, 0, 0) > 0)
         {
             if (m.message == Native.WM_QUIT) break;
+            if (m.message == WM_SESSIONCHANGE)
+            {
+                // registrations can drop across session reconnect — re-register
+                Native.UnregisterHotKey(_hwnd, HOTKEY_PANIC);
+                Native.RegisterHotKey(_hwnd, HOTKEY_PANIC, Native.MOD_CONTROL | Native.MOD_ALT, Native.VK_PAUSE);
+            }
             Native.TranslateMessage(ref m);
             Native.DispatchMessageW(ref m);
         }

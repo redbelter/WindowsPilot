@@ -37,7 +37,7 @@ public sealed class UiaService : IAsyncDisposable
     public UiaService(PilotSettings cfg, EventHub events, ILoggerFactory logs)
     {
         _cfg = cfg; Events = events; _log = logs.CreateLogger<UiaService>();
-        Registry = new ElementRegistry(logs.CreateLogger<ElementRegistry>());
+        Registry = new ElementRegistry();
         _sta = new Thread(Run) { Name = "pilot-uia", IsBackground = true };
         _sta.SetApartmentState(ApartmentState.STA);
         _sta.Start();
@@ -71,8 +71,13 @@ public sealed class UiaService : IAsyncDisposable
     public Task<T> Run<T>(Func<T> op, string what, CancellationToken ct = default)
     {
         var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Deadline travels WITH the queued item (design §5): an op whose caller
+        // already got Timeout must not fire later against unrelated UI —
+        // ghost clicks nobody observes. Tick-based so no CTS lifetime games.
+        var deadline = Environment.TickCount64 + _cfg.Uia.PerOpTimeoutMs;
         if (_life.IsCancellationRequested || !_q.TryAdd(() =>
             {
+                if (Environment.TickCount64 > deadline) { tcs.TrySetCanceled(); return null; }
                 try { tcs.TrySetResult(op()); } catch (Exception e) { tcs.TrySetException(e); }
                 return null;
             }))

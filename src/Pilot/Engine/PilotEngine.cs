@@ -23,7 +23,7 @@ public sealed record CallContext(string Host, string TokenScope);
 public sealed class PilotEngine(
     PilotSettings cfg, UiaService uia, InputInjector input, CaptureService capture,
     ArmState arm, KillSwitch kill, AuditLog audit, Guard guard, EventHub events,
-    TokenStore tokens, ILogger<PilotEngine> log)
+    ILogger<PilotEngine> log)
 {
     readonly DateTime _started = DateTime.UtcNow;
     long _rateTokens; long _rateLast;
@@ -214,10 +214,30 @@ public sealed class PilotEngine(
     {
         if (!cfg.Audit.SaveShots) return "off";
         var id = Guid.NewGuid().ToString("N")[..12];
-        try { File.WriteAllBytes(Path.Combine(cfg.ShotsDir, id + ".jpg"), jpeg); }
+        try
+        {
+            File.WriteAllBytes(Path.Combine(cfg.ShotsDir, id + ".jpg"), jpeg);
+            PruneShots();
+        }
         catch (Exception e) { log.LogWarning("shot save failed: {Err}", e.Message); return "err"; }
         return id;
     }
+
+    /// <summary>Shots grow one JPEG per verify-cycle on always-on guests — prune
+    /// like AuditLog.RotateOld does for jsonl, same retain window.</summary>
+    void PruneShots()
+    {
+        if (_prunedAt == Environment.TickCount64 / 60000) return;   // ~once a minute
+        _prunedAt = Environment.TickCount64 / 60000;
+        try
+        {
+            var cutoff = DateTime.Now.AddDays(-cfg.Audit.RetainDays);
+            foreach (var f in Directory.GetFiles(cfg.ShotsDir, "*.jpg"))
+                if (File.GetLastWriteTime(f) < cutoff) File.Delete(f);
+        }
+        catch { }
+    }
+    long _prunedAt = -1;
 
     // ============================ mutations ============================
 
@@ -256,10 +276,17 @@ public sealed class PilotEngine(
             catch (PilotException) { }
         }
 
-        long seq = audit.Write(cx.Host, cx.TokenScope, tool, args,
-            target: new { proc = fgProc, deny = denyHit },
-            guard: new { armed = arm.Info.Armed, rate = $"{_rateTokens}/{cfg.Governance.RatePerMin}" },
-            res: new { ok = failure is null, code = (failure as PilotException)?.Code, ms = sw.ElapsedMilliseconds });
+        // A completed action must not be reported failed because the audit
+        // write hiccuped — log it and keep the verify bundle.
+        long seq = 0;
+        try
+        {
+            seq = audit.Write(cx.Host, cx.TokenScope, tool, args,
+                target: new { proc = fgProc, deny = denyHit },
+                guard: new { armed = arm.Info.Armed, rate = $"{_rateTokens}/{cfg.Governance.RatePerMin}" },
+                res: new { ok = failure is null, code = (failure as PilotException)?.Code, ms = sw.ElapsedMilliseconds });
+        }
+        catch (Exception ae) { log.LogWarning("audit write failed: {Err}", ae.Message); }
 
         if (failure is not null) throw failure;
 
@@ -309,7 +336,7 @@ public sealed class PilotEngine(
         try
         {
             var pid = (int)Native.GetWindowThreadProcessId(hwnd, out int p); _ = pid;
-            var proc = Process.GetProcessById(p);
+            using var proc = Process.GetProcessById(p);
             return (proc.ProcessName, guard.DenyCheck(proc.ProcessName));
         }
         catch { return (null, null); }
@@ -448,15 +475,18 @@ public sealed class PilotEngine(
                     ? new[] { Process.GetProcessById(pid.Value) }
                     : Process.GetProcessesByName(processName!);
                 foreach (var p in targets)
+                {
                     try { Native.TerminateProcess(p.Handle, 0); events.Push("process_exited", new { pid = p.Id }); }
                     catch (Exception e) { log.LogWarning("kill {Pid}: {Err}", p.Id, e.Message); }
+                    finally { try { p.Dispose(); } catch { } }
+                }
             });
         });
 
     // ========================== wait_for ==========================
 
     public Task<WaitForResult> WaitForAsync(WaitCondition cond, int timeoutS, int intervalMs)
-        => new Waiter(uia, events, log).WaitAsync(cond, Math.Clamp(timeoutS, 1, 600), Math.Max(50, intervalMs));
+        => new Waiter(uia, events).WaitAsync(cond, Math.Clamp(timeoutS, 1, 600), Math.Max(50, intervalMs));
 
     // ========================== lifecycle bits ==========================
 

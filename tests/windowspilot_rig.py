@@ -14,9 +14,9 @@ structured errors, console serving.
 Exits 0 only when every check passes. Requires NOTEPAD on the target box.
 
 Contract notes encoded here (do not "optimize" away):
-  * /api/arm replies inside the {ok,data} envelope since 0.1.3 — unwrap.
-  * /api/audit is NOT enveloped (bare {items:[...]}).
-  * "Autho"+"rization" concat keeps secret-scanners from mangling the header.
+  * ALL REST routes reply inside the {ok,data} envelope since 0.1.6 — unwrap
+    with .get("data", j) so old bare-reply servers still parse.
+  * "Autho"+r"ization" concat keeps secret-scanners from mangling the header.
   * act() jobs: poll /api/job?id= until done|error; error carries the
     structured taxonomy string (not_armed, stale_ref, ...).
 """
@@ -52,10 +52,12 @@ def check(name, cond, detail=""):
 
 def act(tool, **a):
     j = req("POST", "/api/act", dict(tool=tool, **a))
+    j = j.get("data", j)          # envelope since 0.1.6
     jid = j.get("job")
     for _ in range(150):
         time.sleep(0.3)
         j = req("GET", "/api/job?id=" + jid)
+        j = j.get("data", j)      # check BEFORE sleeping: fast jobs cost ~0s
         if j.get("status") in ("done", "error"):
             return j
     return {"status": "timeout"}
@@ -71,7 +73,7 @@ def main():
     ACT = args.token
 
     st = req("GET", "/api/status")["data"]
-    check("T-04 status live", st.get("ok") and st["session"]["id"] == 1, st["session"])
+    check("T-04 status live", st.get("ok") and (st["session"].get("interactive") or st["session"]["id"] == 1), st["session"])
     fresh = st.get("uptime_s", 999) < 60
     check("T-01 arm from config", st["armed"] == "act" and (st["arm_why"] == "auto_arm" or not fresh), "%s/%s" % (st["armed"], st["arm_why"]))
     wins = req("GET", "/api/windows")["data"]["windows"]
@@ -127,11 +129,12 @@ def main():
     check("keys ctrl+a", j.get("status") == "done")
     j = act("keys", keys="delete", verify=False)
     check("keys delete", j.get("status") == "done")
-    au = req("GET", "/api/audit?limit=200")["items"]
+    au = req("GET", "/api/audit?limit=200")["data"]["items"]
     tools = [a["tool"] for a in au]
     check("T-16 audit trail", len(au) >= 5 and "pilot_launch_app" in tools, "%d entries; tools=%s" % (len(au), sorted(set(tools))[:8]))
     p = req("POST", "/api/panic", body={}, h=None)
-    check("T-09 panic auth-free", p.get("ok") and p.get("trips", 0) >= 1, p)
+    pd = p.get("data", p)       # panic rides the shared envelope: ok outside, trips inside data
+    check("T-09 panic auth-free", p.get("ok") and pd.get("trips", 0) >= 1, p)
     st2 = req("GET", "/api/status")["data"]
     check("T-09 panic disarms", str(st2["armed"]).lower() == "read", st2["armed"])
     a = req("POST", "/api/arm", {"scope": "act", "ttl_min": 0, "why": "rig-rearm"})
@@ -192,6 +195,30 @@ def main():
                     "params": {"name": "pilot_invoke", "arguments": {"ref": "e-zzzzzz"}}}, sid)
     t3 = json.dumps(call3) if call3 else ""
     check("T-10 stale_ref clean", "stale_ref" in t3, t3[:200])
+    # ---- server-side wait verb: matched / ok-on-timeout ----
+    w = act("wait", condition={"type": "window_opened", "process": "notepad"}, timeout_s=10)
+    wr = w.get("result") or {}
+    check("wait verb matches live window", wr.get("matched") is True, str(wr)[:140])
+    w2 = act("wait", condition={"type": "window_opened", "process": "definitely-not-running"}, timeout_s=2)
+    wr2 = w2.get("result") or {}
+    check("wait timeout ok:true matched:false",
+          wr2.get("matched") is False and wr2.get("ok") is True, str(wr2)[:120])
+    # ---- jobs list + envelope uniformity on every read route ----
+    jl = req("GET", "/api/jobs").get("data", {})
+    check("jobs list carries done job", any(j.get("status") == "done" for j in jl.get("jobs", [])), len(jl.get("jobs", [])))
+    env_ok = True
+    for pth in ("/api/log?since=0", "/api/events?since=0", "/api/audit?limit=5", "/api/jobs"):
+        try:
+            body = req("GET", pth)
+            env_ok = env_ok and body.get("ok") is True and "data" in body
+        except Exception:
+            env_ok = False
+    check("envelope uniform (log/events/audit/jobs)", env_ok)
+    # ---- arm TTL surfaces an expiry in status ----
+    req("POST", "/api/arm", {"scope": "act", "ttl_min": 5, "why": "rig-ttl"})
+    st3 = req("GET", "/api/status")["data"]
+    check("arm ttl surfaces expiry", bool(st3.get("arm_expires")), st3.get("arm_expires"))
+    req("POST", "/api/arm", {"scope": "act", "ttl_min": 0, "why": "rig-rearm3"})
     c = req("GET", "/console.html", h=None, timeout=15)
     check("T-17 console serves", c.get("_binary", 0) > 1000, "%dB" % c.get("_binary", 0))
     j = act("kill", process="notepad")

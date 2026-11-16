@@ -112,9 +112,26 @@ public sealed class PilotSettings
         if (Enum.TryParse<AutoArm>(Environment.GetEnvironmentVariable("PILOT_AUTO_ARM"), true, out var aa)) s.Governance.AutoArm = aa;
 
         if (s.Rig.Profile) s.Governance.AllowMcpArm = true;   // rig implies mcp-arm
-        Directory.CreateDirectory(s.DataDir);
-        Directory.CreateDirectory(s.AuditDir);
-        Directory.CreateDirectory(s.ShotsDir);
+        // GUI-subsystem exe: a throw here means a silent log-less exit from
+        // the scheduled task. Fall back to the per-user temp dir instead.
+        try
+        {
+            Directory.CreateDirectory(s.DataDir);
+            Directory.CreateDirectory(s.AuditDir);
+            Directory.CreateDirectory(s.ShotsDir);
+        }
+        catch (Exception e)
+        {
+            try
+            {
+                log.LogWarning("data dir '{Dir}' failed ({Err}); falling back to temp", s.DataDir, e.Message);
+                s.DataDir = Path.Combine(Path.GetTempPath(), "WindowsPilot");
+                Directory.CreateDirectory(s.DataDir);
+                Directory.CreateDirectory(s.AuditDir);
+                Directory.CreateDirectory(s.ShotsDir);
+            }
+            catch { /* last resort: in-memory defaults already set */ }
+        }
         return s;
     }
 

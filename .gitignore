@@ -3,7 +3,8 @@ obj/
 *.user
 .vs/
 publish/
-stage/
+stage/*
+!stage/*.ps1
 *.binlog
 audit/
 shots/

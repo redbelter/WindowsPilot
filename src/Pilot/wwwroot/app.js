@@ -20,16 +20,22 @@ tokEl.onchange = () => { TOKEN = tokEl.value.trim(); localStorage.setItem('pilot
 
 // ---------- tiny api helper (hyperv dashboard pattern: {ok,data} | Err) ----
 async function api(path, body) {
-  const opt = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+  const opt = Object.assign(
+    body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {},
+    { signal: AbortSignal.timeout(8000) });                       // hung fetches die visibly
   const r = await fetch('/api' + path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(TOKEN), opt);
-  const j = await r.json();
+  let j;
+  try { j = await r.json(); }
+  catch { throw new Error('HTTP ' + r.status + ' (non-JSON reply from ' + path + ')'); }
   if (j.ok === false) throw Object.assign(new Error(j.error + ': ' + (j.msg || '')), j);
   return j.data !== undefined ? j.data : j;
 }
 async function job(tool, args) {
   const { job: id } = await api('/act', Object.assign({ tool }, args || {}));
+  let waitMs = 60;                                    // check early, back off gently
   for (let i = 0; i < 200; i++) {
-    await new Promise(r2 => setTimeout(r2, 100));
+    await new Promise(r2 => setTimeout(r2, waitMs));
+    waitMs = Math.min(300, waitMs + 30);
     const j = await api('/job?id=' + id);
     if (j.status === 'done') return j.result;
     if (j.status === 'error') throw new Error(j.error);
@@ -104,7 +110,8 @@ $('#armBtn').onclick = async () => {
 $('#driveBtn').onclick = () => { $('#ckDrive').click(); };
 
 // ---------- /ws/view frames -------------------------------------------------
-let ws = null, frames = 0, driveOn = false;
+let ws = null, frames = 0, lastFrameAt = 0, driveOn = false;
+let pendingBlob = null, rafArmed = false;   // one-slot coalescer: draw latest frame only
 function connectView() {
   ws = new WebSocket(`ws://${location.host}/ws/view?token=${encodeURIComponent(TOKEN)}`);
   ws.binaryType = 'arraybuffer';
@@ -115,17 +122,34 @@ function connectView() {
       if (m.type === 'meta') { armed = m.armed; }
       return;
     }
+    lastFrameAt = Date.now();
     frames++;
     $('#fpsPill').textContent = 'frames: ' + frames;
-    const img = new Image();
-    img.onload = () => {
-      const c = $('#scr');
-      if (c.width !== img.width) { c.width = img.width; c.height = img.height; $('#ovl').width = img.width; $('#ovl').height = img.height; }
-      c.getContext('2d').drawImage(img, 0, 0);
-    };
-    img.src = URL.createObjectURL(new Blob([ev.data], { type: 'image/jpeg' }));
+    pendingBlob = new Blob([ev.data], { type: 'image/jpeg' });   // replace-not-stack
+    if (!rafArmed) { rafArmed = true; requestAnimationFrame(drawLatest); }
   };
-  ws.onclose = () => setTimeout(connectView, 1500);
+  ws.onclose = () => { setTimeout(connectView, backoff()); };
+  ws.onerror = () => { try { ws.close(); } catch (e) { } };      // onclose applies backoff
+  window.addEventListener('online', () => { try { ws.close(); } catch (e) { } });   // instant re-link
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { try { ws.close(); } catch (e) { } } });
+}
+let backNs = 1000;
+function backoff() { const b = Math.min(10000, backNs) * (0.8 + Math.random() * 0.4); backNs = Math.min(10000, backNs * 1.5); return b | 0; }
+function drawLatest() {
+  rafArmed = false;
+  if (!pendingBlob) return;
+  const blob = pendingBlob; pendingBlob = null;
+  const img = new Image();
+  img.onload = () => {
+    const c = $('#scr');
+    const resized = c.width !== img.width;
+    if (resized) { c.width = img.width; c.height = img.height; $('#ovl').width = img.width; $('#ovl').height = img.height; }
+    c.getContext('2d').drawImage(img, 0, 0);
+    if (resized && treeLoaded) drawOverlay();   // keep mark boxes aligned after resize
+    URL.revokeObjectURL(img.src);               // no blob leak on an all-day page
+  };
+  img.onerror = () => URL.revokeObjectURL(img.src);
+  img.src = URL.createObjectURL(blob);
 }
 connectView();
 

@@ -53,8 +53,12 @@ def api(path, body=None, timeout=None):
 
 
 def act(tool, timeout_s=90, **args):
-    """Run one act verb through the /api/act job queue; return its result dict."""
+    """Run one act verb through the /api/act job queue; return its result dict.
+
+    All routes reply inside the {ok,data} envelope since 0.1.6; unwrap once,
+    tolerate old bare servers with .get("data", j)."""
     j = api("/api/act", dict(tool=tool, **args))
+    j = j.get("data", j)
     if "job" not in j:
         raise RuntimeError(f"{tool} rejected: {json.dumps(j)[:200]}")
     jid = j["job"]
@@ -62,6 +66,7 @@ def act(tool, timeout_s=90, **args):
     while time.time() < deadline:
         time.sleep(0.3)
         j = api("/api/job?id=" + urllib.parse.quote(jid))
+        j = j.get("data", j)
         if j.get("status") == "done":
             return j.get("result") or {}
         if j.get("status") == "error":

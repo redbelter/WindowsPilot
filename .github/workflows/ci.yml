@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    # tier 1: anywhere. Compile + syntax-check the portable test suites.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: build (warnings are errors)
+        working-directory: src/Pilot
+        run: dotnet build -c Release -p:TreatWarningsAsErrors=true -p:WarningsAsErrors=''
+      - name: suites compile
+        run: python -m py_compile tests/windowspilot_smoke.py tests/windowspilot_rig.py
+
+  smoke:
+    # tier 2: needs a logged-on interactive session (UIA + SendInput are blind
+    # in Session 0). windows-latest boots one; ubuntu-latest does not.
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: publish + start pilot
+        shell: pwsh
+        run: |
+          Push-Location src/Pilot
+          dotnet publish -c Release -o ../../publish_out
+          Pop-Location
+          # deterministic tokens so suites can carry a named act token
+          $dir = "$env:LOCALAPPDATA\WindowsPilot"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Set-Content "$dir\tokens.json" -Value '{"act-rig-1":"act"}' -Encoding ascii
+          $env:PILOT_RIG = '1'         # localhost-friendly auth for CI
+          Start-Process -FilePath publish_out/WindowsPilot.exe
+          Start-Sleep -Seconds 4
+      - name: health gate
+        shell: pwsh
+        run: |
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $r = Invoke-RestMethod http://localhost:8791/api/status -TimeoutSec 5
+              if ($r.ok) { "pilot up: " + $r.data.version; exit 0 }
+            } catch { Start-Sleep -Seconds 1 }
+          }
+          Write-Error "pilot never answered /api/status"
+          Get-Content "$env:LOCALAPPDATA\WindowsPilot\pilot.log" -Tail 50
+          exit 1
+      - name: portable suite
+        run: python tests/windowspilot_smoke.py --base http://localhost:8791 --only health
+      - name: governance rig
+        run: python tests/windowspilot_rig.py --base http://localhost:8791 --token act-rig-1
