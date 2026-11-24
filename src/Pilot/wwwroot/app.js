@@ -415,6 +415,7 @@ document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
   const num = v => { const x = parseInt($(v).value, 10); return isNaN(x) ? null : x; };
   const args = {
     launch: () => ({ cmd: n('#opCmd'), args: n('#opArgs') || undefined, workdir: n('#opWdir') || undefined, wait_window_ms: 8000 }),
+    run: () => ({ cmd: n('#opCmd'), args: n('#opArgs') || undefined, workdir: n('#opWdir') || undefined, timeout_s: 30 }),
     kill: () => ({ process: n('#opProc') || undefined, pid: num('#opPid') || undefined }),
     type: () => ({ text: n('#opText'), mode: $('#opMode').value, verify: true }),
     keys: () => ({ keys: n('#opKeys'), repeat: num('#opRepeat') || 1 }),
@@ -435,6 +436,7 @@ document.querySelectorAll('[data-act]').forEach(b => b.onclick = async () => {
   try {
     const r = await job(T, args);
     if (T === 'wait') $('#waitPill').textContent = 'matched:' + (r && r.matched) + (r && r.waited_ms ? ' ' + r.waited_ms + 'ms' : '');
+    else if (T === 'run') logLine('run exit ' + (r && r.exit_code) + ((r && r.stdout) ? ': ' + String(r.stdout).trim().slice(0, 300) : ''));
     else logLine(T + ' ok');
     opsRefresh();
   } catch (e) {

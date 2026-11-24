@@ -155,12 +155,13 @@ public static class PilotApi
                 "select" => await e.SelectAsync(cx, req.Req ?? "", req.Verify ?? true),
                 "launch" => await e.LaunchAsync(cx, req.Cmd ?? "", req.Args, req.Workdir, req.WaitWindowMs ?? 8000, true),
                 "kill" => await e.KillAppAsync(cx, req.Pid, req.Process),
+                "run" => await e.RunAsync(cx, req.Cmd ?? "", req.Args, req.Workdir, req.TimeoutS ?? 30),
                 "wait" => await e.WaitForAsync(req.Condition?.ToCondition()
                         ?? throw new PilotException("bad_request", "wait needs a condition object",
                             "{\"type\":\"element_appears\",\"query\":{...}} | window_opened {process|title_regex} | text_matches {ref,contains} ..."),
                     req.TimeoutS ?? 30, req.IntervalMs ?? 250),
                 _ => throw new PilotException("not_found", $"unknown act tool '{req.Tool}'",
-                    "click drag scroll type keys value invoke focus toggle expand select launch kill wait"),
+                    "click drag scroll type keys value invoke focus toggle expand select launch kill run wait"),
             });
             return Results.Json(new { ok = true, data = new { job = jid } });
         });

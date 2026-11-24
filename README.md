@@ -82,7 +82,7 @@ or `?token=<token>`.
 | `GET /api/tree?ref=` · `/api/find` · `/api/element?ref=` | actionable-first UIA |
 | `POST /api/screenshot` | `marks: true` → set-of-marks overlay |
 | `GET /api/shots/{id}` | captured JPEG |
-| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/toggle/expand/select/launch/kill/wait; replies `{ok,data:{job:"<id>"}}` |
+| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/toggle/expand/select/launch/kill/run/wait; replies `{ok,data:{job:"<id>"}}` |
 | `GET /api/jobs` · `/api/job?id=` | job list / single job (hyperv dashboard shape) |
 | `POST /api/wait` | server-side conditions: element/window/foreground/focused/text/pixel/action_settled |
 | `GET /api/audit` | JSONL audit tail (`csv=1` for export) |

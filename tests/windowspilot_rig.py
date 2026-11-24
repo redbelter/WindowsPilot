@@ -195,6 +195,13 @@ def main():
                     "params": {"name": "pilot_invoke", "arguments": {"ref": "e-zzzzzz"}}}, sid)
     t3 = json.dumps(call3) if call3 else ""
     check("T-10 stale_ref clean", "stale_ref" in t3, t3[:200])
+    # ---- headless run verb: stdout capture without touching the desktop ----
+    w = act("run", cmd="cmd.exe", args="/c echo PILOT-RUN-OK", timeout_s=20)
+    rr = w.get("result") or {}
+    check("run captures stdout", rr.get("exit_code") == 0 and "PILOT-RUN-OK" in (rr.get("stdout") or ""), str(rr)[:140])
+    w = act("run", cmd="cmd.exe", args="/c exit 3", timeout_s=20)
+    rr2 = w.get("result") or {}
+    check("run surfaces nonzero exit", rr2.get("exit_code") == 3, str(rr2)[:120])
     # ---- server-side wait verb: matched / ok-on-timeout ----
     w = act("wait", condition={"type": "window_opened", "process": "notepad"}, timeout_s=10)
     wr = w.get("result") or {}

@@ -14,7 +14,7 @@
     <AssemblyName>WindowsPilot</AssemblyName>
     <RootNamespace>WindowsPilot</RootNamespace>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <Version>0.1.6</Version>
+    <Version>0.1.7</Version>
   </PropertyGroup>
 
   <ItemGroup>

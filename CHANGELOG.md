@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.7
+- `pilot_run` / act verb `run`: headless program execution with captured `{exit_code,stdout,stderr,ms}` — agents no longer need remote PowerShell or scheduled-task tricks for anything that doesn't touch the desktop. Goes through the same governed seam (arm + denylist + rate), audits as `pilot_run`, kills its process tree on `timeout_s` (default 30, max 600). Console Operator tab gets a Run button. Rig covers stdout capture + nonzero exit (31 assertions).
+
 ## 0.1.6
 - REST: every route replies inside the `{ok,data}` / `{ok:false,error,msg,hint}` envelope (`/api/events`, `/api/log`, `/api/audit`, `/api/jobs`, `/api/job`, `/api/act` job handle, panic, config, arm/disarm). Clients unwrap once.
 - REST: JSON-shaped 404 bodies (was empty `Results.NotFound()`); bad arm scope returns 400 with the accepted value list instead of an opaque 500.

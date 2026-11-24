@@ -136,9 +136,10 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
   </section>
 
   <section id="paneOperator" hidden data-zone="Operator — act on selection or coordinates">
-    <div class="opgrid">      <fieldset class="op"><legend>launch / kill</legend>
+    <div class="opgrid">      <fieldset class="op"><legend>launch / kill / run</legend>
         <input id="opCmd" placeholder="cmd (notepad.exe)" size="16"><input id="opArgs" placeholder="args" size="10"><input id="opWdir" placeholder="workdir" size="10">
         <button data-act="launch">Launch</button>
+        <button data-act="run">Run</button>
         <input id="opProc" placeholder="process (notepad)" size="14">pid <input id="opPid" placeholder="—" size="4"><button data-act="kill">Kill</button>
       </fieldset>
       <fieldset class="op"><legend>type / keys <span class="pill" id="selPill">no ref</span></legend>
@@ -179,7 +180,7 @@ fieldset.op legend{color:var(--mut);font-size:11px;padding:0 4px}
 <div id="log"></div>
 <div id="lightbox"><img id="lbImg"></div>
 
-<script src="/app.js?v=11"></script>
+<script src="/app.js?v=12"></script>
 <script>
 // right-column tabs: one panel beside the sticky live screen at a time.
 // feeds hydrate on load regardless of visible tab, so switching is instant.

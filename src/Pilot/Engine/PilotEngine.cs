@@ -488,6 +488,67 @@ public sealed class PilotEngine(
     public Task<WaitForResult> WaitForAsync(WaitCondition cond, int timeoutS, int intervalMs)
         => new Waiter(uia, events).WaitAsync(cond, Math.Clamp(timeoutS, 1, 600), Math.Max(50, intervalMs));
 
+    // ========================== headless run ==========================
+    // Direct program execution with captured output — the layer agents
+    // otherwise reach for by shelling out through remote PowerShell or a one-shot scheduled task.
+    public async Task<object> RunAsync(CallContext cx, string cmd, string? args, string? workdir, int timeoutS)
+    {
+        if (string.IsNullOrWhiteSpace(cmd))
+            throw new PilotException("bad_request", "run needs a cmd",
+                "e.g. {\"cmd\":\"ipconfig\",\"args\":\"/all\"} — shell-resolvable names work");
+        var (fgProc, denyHit) = ForegroundProcess();
+        guard.CheckMutation(arm, ArmScope.act, fgProc);
+        RateCheck();
+
+        var sw = Stopwatch.StartNew();
+        int code = -1; string stdout = "", stderr = "";
+        Exception? failure = null;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(cmd, args ?? "")
+            {
+                RedirectStandardOutput = true, RedirectStandardError = true,
+                UseShellExecute = false, CreateNoWindow = true,
+            };
+            if (!string.IsNullOrWhiteSpace(workdir)) psi.WorkingDirectory = workdir;
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            // start reads BEFORE WaitForExit so full buffers can't deadlock
+            var soTask = p.StandardOutput.ReadToEndAsync();
+            var seTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(Math.Clamp(timeoutS, 1, 600) * 1000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                throw new PilotException("timeout", $"'{cmd}' still running after {timeoutS}s",
+                    "raise timeout_s (max 600) or split the command");
+            }
+            stdout = await soTask; stderr = await seTask; code = p.ExitCode;
+        }
+        catch (Exception e) { failure = e; stderr = string.IsNullOrEmpty(stderr) ? e.Message : stderr; }
+        sw.Stop();
+
+        events.Push("process_ran", new { cmd, exit_code = code, ms = sw.ElapsedMilliseconds });
+        try
+        {
+            audit.Write(cx.Host, cx.TokenScope, "pilot_run", new { cmd, args, workdir },
+                target: new { proc = fgProc, deny = denyHit },
+                guard: new { armed = arm.Info.Armed, rate = $"{_rateTokens}/{cfg.Governance.RatePerMin}" },
+                res: new { ok = failure is null, exit_code = code, ms = sw.ElapsedMilliseconds });
+        }
+        catch (Exception ae) { log.LogWarning("audit write failed: {Err}", ae.Message); }
+
+        if (failure is PilotException pe) throw pe;
+        if (failure is not null)
+            throw new PilotException("job_error", $"run failed: {failure.Message}",
+                "check the exe path; shell-resolvable names also work");
+        return new
+        {
+            exit_code = code,
+            stdout = stdout.Length > 64000 ? stdout[..64000] : stdout,
+            stderr = stderr.Length > 32000 ? stderr[..32000] : stderr,
+            ms = sw.ElapsedMilliseconds,
+        };
+    }
+
     // ========================== lifecycle bits ==========================
 
     public object RedactedConfig() => cfg.RedactedView();

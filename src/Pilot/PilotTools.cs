@@ -182,6 +182,14 @@ public sealed class PilotTools(PilotEngine engine, ArmState arm, KillSwitch kill
         Guard(async () => await engine.KillAppAsync(Cx(), pid, process_name));
 
     [McpServerTool, Description(
+        "Run a program HEADLESS with captured stdout/stderr/exit_code — no window, no UIA needed. Use this for anything " +
+        "that doesn't need the desktop (queries, service checks, file prep) instead of remote PowerShell or scheduled-task tricks. " +
+        "Returns {exit_code,stdout,stderr,ms}; needs ARMED(act) like every mutation.")]
+    public Task<CallToolResult> Pilot_run(string cmd, string? args = null, string? workdir = null,
+        int timeout_s = 30) =>
+        Guard(async () => await engine.RunAsync(Cx(), cmd, args, workdir, timeout_s));
+
+    [McpServerTool, Description(
         "Arm injection. ONLY available when config governance.allow_mcp_arm (rig profiles). Normally a HUMAN action " +
         "via the web console. scope: act (inject+patterns) or drive (web-console mouse/keyboard).")]
     public CallToolResult Pilot_arm([Description("act|drive")] string scope = "act", int ttl_min = 15, string why = "")
