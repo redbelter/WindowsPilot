@@ -54,7 +54,20 @@ FlaUI.Core/UIA3 4.0, ModelContextProtocol.AspNetCore 2.2, System.Drawing.Common.
 ## Deploy (must run in Session 1)
 
 WindowsPilot needs an interactive desktop session — a Session-0 service is
-UIA/SendInput blind. Register it as an **Interactive** scheduled task:
+UIA/SendInput blind. One-shot install (works over PS Remoting; serves the zip
+from any static file server):
+
+```powershell
+Invoke-Command -ComputerName BOX { Invoke-WebRequest http://HOST:18888/install.ps1 -UseBasicParsing | Invoke-Expression }
+# options: -Base <zip-server-root> -Port 8791 -Bind loopback-or-LAN -TokenAct <tok> -Loopback
+```
+
+`stage/install.ps1` downloads the payload, writes `pilot.json` + `tokens.json`
+into the task principal's `%LOCALAPPDATA%\WindowsPilot`, opens the firewall
+port, registers the reboot-resilient Interactive task below, starts it, and
+polls `/api/status` so the remote caller sees `WindowsPilot up v...` as proof.
+Idempotent — re-run it to upgrade or repair. Manual equivalent of the task it
+registers:
 
 ```powershell
 # Launch the bare exe: the build is WinExe (GUI subsystem) and NEVER allocates
