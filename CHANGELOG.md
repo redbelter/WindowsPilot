@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.8
+- File surface: `GET /api/files` (browse), `GET /api/file` (read; utf-8/utf-16 sniff with BOM strip, binary → base64, `max_chars` head-slice + `truncated` flag), `POST /api/file` / act verb `write_file` (writes text or b64, creates parent dirs, audited). Relative paths anchor on the pilot data dir. MCP parity: `pilot_list_files` / `pilot_read_file` / `pilot_write_file`. Console gets a Files tab (browse, preview, download, multi-upload). Rig 31→35 assertions.
+
 ## 0.1.7
 - `pilot_run` / act verb `run`: headless program execution with captured `{exit_code,stdout,stderr,ms}` — agents no longer need remote PowerShell or scheduled-task tricks for anything that doesn't touch the desktop. Goes through the same governed seam (arm + denylist + rate), audits as `pilot_run`, kills its process tree on `timeout_s` (default 30, max 600). Console Operator tab gets a Run button. Rig covers stdout capture + nonzero exit (31 assertions).
 
