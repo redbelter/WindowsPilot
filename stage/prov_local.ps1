@@ -40,13 +40,28 @@ try {
 try { netsh.exe advfirewall firewall add rule name="WindowsPilot" dir=in action=allow protocol=TCP localport=8791 profile=any | Out-Null; P FW_OPEN } catch { P FW_EXC }
 
 # ---- payload: prefer pre-seeded local zip, else download ----
-if (-not (Test-Path C:\WindowsPilot\app\WindowsPilot.exe)) {
+# version gate: skip when the running pilot already matches served version.json
+# (the tick re-runs this script often; the gate makes it a cheap status compare)
+$cur = ''
+try { $cur = (Invoke-RestMethod http://localhost:8791/api/status?token=*** -TimeoutSec 5).data.version } catch { }
+$want = ''
+try { $want = (Invoke-RestMethod http://192.168.50.1:8898/version.json -TimeoutSec 15).version } catch { }
+$current = $false
+if ($cur -and $want) {
+  $pa = @($cur -split '\.' | Where-Object { $_ -match '^\d+$' })
+  $pb = @($want -split '\.' | Where-Object { $_ -match '^\d+$' })
+  $current = $true
+  for ($i = 0; $i -lt [Math]::Min($pa.Count, $pb.Count); $i++) { if ($pa[$i] -ne $pb[$i]) { $current = $false; break } }
+}
+if ($current) { P "CURRENT $cur"; exit 0 }
+P "UPDATE cur=$cur want=$want"
+if ((-not (Test-Path C:\WindowsPilot\app\WindowsPilot.exe)) -or $want) {
   New-Item -ItemType Directory -Force C:\WindowsPilot | Out-Null
-  if (-not (Test-Path C:\WindowsPilot\payload.zip)) {
+  if ((-not (Test-Path C:\WindowsPilot\payload.zip)) -or $want) {
     try { Invoke-WebRequest http://192.168.50.1:8898/pilot-payload.zip -OutFile C:\WindowsPilot\payload.zip -UseBasicParsing; P ("DL=" + (Get-Item C:\WindowsPilot\payload.zip).Length) }
     catch { P ("DL_EXC " + $_.Exception.Message); exit 0 }   # retry next tick
   }
-  try { Expand-Archive C:\WindowsPilot\payload.zip C:\WindowsPilot\app -Force; P EXTRACTED }
+  try { Stop-ScheduledTask -TaskName WindowsPilot -ErrorAction SilentlyContinue; Stop-Process -Name WindowsPilot -Force -ErrorAction SilentlyContinue; Remove-Item C:\WindowsPilot\app -Recurse -Force -ErrorAction SilentlyContinue; Expand-Archive C:\WindowsPilot\payload.zip C:\WindowsPilot\app -Force; P EXTRACTED }
   catch { P ("EXTRACT_EXC " + $_.Exception.Message); exit 0 }
 }
 
@@ -77,6 +92,15 @@ try {
   Register-ScheduledTask -TaskName WindowsPilot -Action $a -Principal $pr -Settings $se -Trigger $t | Out-Null
   Start-ScheduledTask -TaskName WindowsPilot
   P PILOT_STARTED
+  # self-update tick: converge on whatever PilotServe (:8898) publishes; the
+  # version gate in prov_local/install keeps each tick cheap.
+  if (-not (Get-ScheduledTask WindowsPilotUpdate -ErrorAction SilentlyContinue)) {
+    $au = New-ScheduledTaskAction -Execute powershell.exe -Argument ('-NoProfile -NonInteractive -WindowStyle Hidden -Command ' + [char]39 + "`$env:PILOT_BIND='0.0.0.0'; Invoke-WebRequest 'http://192.168.50.1:8898/install.ps1' -UseBasicParsing -TimeoutSec 20 | Invoke-Expression" + [char]39)
+    $tw2 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 30)
+    $su2 = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit 0 -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName WindowsPilotUpdate -Action $au -Trigger $tw2 -Principal $pr -Settings $su2 -Force | Out-Null
+    P UPDATE_TASK_ON
+  }
 } catch { P ("TASK_EXC " + $_.Exception.Message); exit 0 }
 
 New-Item -ItemType File -Force C:\prov.done | Out-Null

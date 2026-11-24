@@ -5,6 +5,7 @@ obj/
 publish/
 stage/*
 !stage/*.ps1
+!stage/version.json
 *.binlog
 audit/
 shots/

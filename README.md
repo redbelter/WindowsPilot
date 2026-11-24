@@ -54,20 +54,25 @@ FlaUI.Core/UIA3 4.0, ModelContextProtocol.AspNetCore 2.2, System.Drawing.Common.
 ## Deploy (must run in Session 1)
 
 WindowsPilot needs an interactive desktop session — a Session-0 service is
-UIA/SendInput blind. One-shot install (works over PS Remoting; serves the zip
-from any static file server):
+UIA/SendInput blind. One-shot install (works over PS Remoting; PilotServe on
+the Hyper-V host serves the zip + manifest at `:8898`, any static root works):
 
 ```powershell
-Invoke-Command -ComputerName BOX { Invoke-WebRequest http://HOST:18888/install.ps1 -UseBasicParsing | Invoke-Expression }
-# options: -Base <zip-server-root> -Port 8791 -Bind loopback-or-LAN -TokenAct <tok> -Loopback
+Invoke-Command -ComputerName BOX { Invoke-WebRequest http://HOST:8898/install.ps1 -UseBasicParsing | Invoke-Expression }
+# options: -Base <zip-server-root> -Port 8791 -Bind loopback-or-LAN -TokenAct <tok> -EveryMin 30 -Force -Loopback
 ```
 
 `stage/install.ps1` downloads the payload, writes `pilot.json` + `tokens.json`
-into the task principal's `%LOCALAPPDATA%\WindowsPilot`, opens the firewall
-port, registers the reboot-resilient Interactive task below, starts it, and
-polls `/api/status` so the remote caller sees `WindowsPilot up v...` as proof.
-Idempotent — re-run it to upgrade or repair. Manual equivalent of the task it
-registers:
+into the task principal's `%LOCALAPPDATA%\WindowsPilot` (existing files kept),
+opens the firewall port, registers the reboot-resilient Interactive task below,
+starts it, and polls `/api/status` so the remote caller sees
+`WindowsPilot up v...` as proof. It also registers a `WindowsPilotUpdate` tick
+(every `-EveryMin`, default 30): the tick re-fetches the installer, compares
+the live `/api/status` version against `$Base/version.json`, and re-deploys
+only on mismatch — so publishing a new zip + manifest at the serve root
+converges every box on it with zero per-box work. When versions already match
+the tick is a cheap status compare (the pilot is NOT bounced). `-Force`
+re-extracts regardless. Manual equivalent of the task it registers:
 
 ```powershell
 # Launch the bare exe: the build is WinExe (GUI subsystem) and NEVER allocates
