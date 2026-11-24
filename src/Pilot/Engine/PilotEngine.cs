@@ -549,6 +549,94 @@ public sealed class PilotEngine(
         };
     }
 
+    // ========================== files ==========================
+    // Browse + text/binary file transfer for operators and agents: pick a
+    // screenshot, push a config, pull a log — without leaving the governed seam.
+    // Relative paths anchor on DataDir so both faces share one predictable root.
+
+    string ResolveDir(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return cfg.DataDir;
+        var p = path.Trim();
+        return Path.IsPathRooted(p) ? Path.GetFullPath(p) : Path.GetFullPath(Path.Combine(cfg.DataDir, p));
+    }
+
+    public object ListFiles(string? path, int max)
+    {
+        var dir = ResolveDir(path);
+        if (!Directory.Exists(dir))
+            throw new PilotException("not_found", $"directory not found: {dir}", "check the path; '' means the data dir");
+        var cap = Math.Clamp(max, 1, 5000);
+        var items = new List<(string name, string type, long size, string mtime)>();
+        foreach (var d in Directory.EnumerateDirectories(dir).Take(cap))
+        {
+            DirectoryInfo di; try { di = new DirectoryInfo(d); } catch { continue; }
+            items.Add((di.Name + "/", "dir", 0L, di.LastWriteTime.ToString("yyyy-MM-dd HH:mm")));
+        }
+        foreach (var f in Directory.EnumerateFiles(dir).Take(cap))
+        {
+            FileInfo fi; try { fi = new FileInfo(f); } catch { continue; }
+            items.Add((fi.Name, "file", fi.Length, fi.LastWriteTime.ToString("yyyy-MM-dd HH:mm")));
+        }
+        return new
+        {
+            path = dir,
+            items = items.OrderBy(x => x.Item1, StringComparer.OrdinalIgnoreCase)
+                .Select(x => new { name = x.name, type = x.type, size = x.size, mtime = x.mtime })
+                .ToList(),
+        };
+    }
+
+    public object ReadFileText(string path, int maxChars)
+    {
+        var f = ResolveFile(path);
+        var info = new FileInfo(f);
+        var bytes = File.ReadAllBytes(f);
+        var cap = Math.Clamp(maxChars, 1, 2_000_000);
+        var encoding = DetectEncoding(bytes);                       // utf-8 | utf-16 | binary
+        if (encoding == "binary")
+        {
+            var take = Math.Min(cap * 2, bytes.Length);             // base64 overhead margin
+            return new { path = f, encoding, truncated = bytes.Length > take, size = info.Length,
+                         b64 = Convert.ToBase64String(bytes[..take]) };
+        }
+        var len = Math.Min(cap * 4 + 4, bytes.Length);              // head slice for oversized text
+        var slice = bytes[..len];
+        if (encoding == "utf-16") { if (slice.Length >= 2) slice = slice[2..]; }
+        else if (slice.Length >= 3 && slice[0] == 0xEF && slice[1] == 0xBB && slice[2] == 0xBF) slice = slice[3..];
+        var text = encoding == "utf-16"
+            ? System.Text.Encoding.Unicode.GetString(slice)
+            : System.Text.Encoding.UTF8.GetString(slice);
+        return new { path = f, encoding, truncated = bytes.Length > len, size = info.Length, text };
+    }
+
+    static string DetectEncoding(byte[] b)
+    {
+        if (b.Length >= 2 && b[0] == 0xFF && b[1] == 0xFE) return "utf-16";      // PowerShell default
+        var sniff = b.Length > 8192 ? b[..8192] : b;
+        int skip = sniff.Length >= 3 && sniff[0] == 0xEF && sniff[1] == 0xBB && sniff[2] == 0xBF ? 3 : 0;
+        try { new System.Text.UTF8Encoding(false, true).GetString(sniff, skip, sniff.Length - skip); return "utf-8"; }
+        catch { return "binary"; }
+    }
+
+    string ResolveFile(string path)
+    {
+        var f = ResolveDir(path);
+        if (File.Exists(f)) return f;
+        throw new PilotException("not_found", $"file not found: {f}", "browse first: GET /api/files");
+    }
+
+    public Task<VerifyBundle> WriteFileAsync(CallContext cx, string path, string? text, string? b64)
+        => Mutate(cx, "pilot_write_file", new { path }, verify: false, async () =>
+        {
+            var f = ResolveDir(path);                                   // works for new files too
+            Directory.CreateDirectory(Path.GetDirectoryName(f)!);
+            var bytes = text is not null ? System.Text.Encoding.UTF8.GetBytes(text)
+                : Convert.FromBase64String(b64 ?? "");
+            await Task.Run(() => File.WriteAllBytes(f, bytes));
+            events.Push("file_written", new { path = f, size = bytes.Length });
+        });
+
     // ========================== lifecycle bits ==========================
 
     public object RedactedConfig() => cfg.RedactedView();

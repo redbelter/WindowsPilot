@@ -189,6 +189,20 @@ public sealed class PilotTools(PilotEngine engine, ArmState arm, KillSwitch kill
         int timeout_s = 30) =>
         Guard(async () => await engine.RunAsync(Cx(), cmd, args, workdir, timeout_s));
 
+    // ================================ files ================================
+
+    [McpServerTool, Description("Browse a directory (relative paths anchor on the pilot data dir). Returns {path,items:[{name,type,size,mtime}]}. '' lists the data dir itself.")]
+    public Task<CallToolResult> Pilot_list_files(string? path = null, int max = 500) =>
+        Guard(() => Task.FromResult<object>(engine.ListFiles(path, max)));
+
+    [McpServerTool, Description("Read a file as text (base64 when binary). Relative paths anchor on the data dir. Returns {encoding,text|b64,truncated,size}.")]
+    public Task<CallToolResult> Pilot_read_file(string path, int max_chars = 200000) =>
+        Guard(() => Task.FromResult<object>(engine.ReadFileText(path, max_chars)));
+
+    [McpServerTool, Description("Write a text file (or base64 for bytes). Creates parent dirs; needs ARMED(act). Audited as pilot_write_file.")]
+    public Task<CallToolResult> Pilot_write_file(string path, string? text = null, string? b64 = null) =>
+        Guard(async () => await engine.WriteFileAsync(Cx(), path, text, b64));
+
     [McpServerTool, Description(
         "Arm injection. ONLY available when config governance.allow_mcp_arm (rig profiles). Normally a HUMAN action " +
         "via the web console. scope: act (inject+patterns) or drive (web-console mouse/keyboard).")]

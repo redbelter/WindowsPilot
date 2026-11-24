@@ -156,12 +156,13 @@ public static class PilotApi
                 "launch" => await e.LaunchAsync(cx, req.Cmd ?? "", req.Args, req.Workdir, req.WaitWindowMs ?? 8000, true),
                 "kill" => await e.KillAppAsync(cx, req.Pid, req.Process),
                 "run" => await e.RunAsync(cx, req.Cmd ?? "", req.Args, req.Workdir, req.TimeoutS ?? 30),
+                "write_file" => await e.WriteFileAsync(cx, req.Path ?? "", req.Text, req.B64),
                 "wait" => await e.WaitForAsync(req.Condition?.ToCondition()
                         ?? throw new PilotException("bad_request", "wait needs a condition object",
                             "{\"type\":\"element_appears\",\"query\":{...}} | window_opened {process|title_regex} | text_matches {ref,contains} ..."),
                     req.TimeoutS ?? 30, req.IntervalMs ?? 250),
                 _ => throw new PilotException("not_found", $"unknown act tool '{req.Tool}'",
-                    "click drag scroll type keys value invoke focus toggle expand select launch kill run wait"),
+                    "click drag scroll type keys value invoke focus toggle expand select launch kill run write_file wait"),
             });
             return Results.Json(new { ok = true, data = new { job = jid } });
         });
@@ -211,6 +212,22 @@ public static class PilotApi
                 : Results.Json(new Err { Error = "not_found", Msg = $"no shot '{leaf}'", Hint = "shots are pruned after audit.retain_days" }, statusCode: 404);
         });
 
+        static IResult WrapSync(Func<object> f)
+        {
+            try { return Results.Json(new { ok = true, data = f() }); }
+            catch (PilotException pe) { return Results.Json(pe.ToErr(), statusCode: 400); }
+            catch (Exception e) { return Results.Json(new Err { Error = "job_error", Msg = e.Message }, statusCode: 500); }
+        }
+
+        api.MapGet("/files", (PilotEngine e, string? path, int? max) => WrapSync(
+            () => e.ListFiles(path, max ?? 500)));
+
+        api.MapGet("/file", (PilotEngine e, string path, int? max_chars) => WrapSync(
+            () => e.ReadFileText(path, max_chars ?? 200_000)));
+
+        api.MapPost("/file", async (FileWriteReq req, PilotEngine e, HttpContext ctx) =>
+            await Wrap(async () => (object)await e.WriteFileAsync(ctx.Ctx(), req.Path ?? "", req.Text, req.B64)));
+
         api.MapGet("/config", (PilotEngine e) => Results.Json(new { ok = true, data = e.RedactedConfig() }));
 
         api.MapGet("/log", (EventHub hub, long? since) =>
@@ -258,6 +275,8 @@ public static class PilotApi
         [JsonPropertyName("keys")] public string? Keys { get; init; } [JsonPropertyName("repeat")] public int? Repeat { get; init; }
         [JsonPropertyName("expand")] public bool? Expand { get; init; }
         [JsonPropertyName("cmd")] public string? Cmd { get; init; } [JsonPropertyName("args")] public string? Args { get; init; } [JsonPropertyName("workdir")] public string? Workdir { get; init; }
+        [JsonPropertyName("path")] public string? Path { get; init; }              // write_file target
+        [JsonPropertyName("b64")] public string? B64 { get; init; }                // write_file bytes (text wins)
         [JsonPropertyName("wait_window_ms")] public int? WaitWindowMs { get; init; }
         [JsonPropertyName("pid")] public int? Pid { get; init; } [JsonPropertyName("process")] public string? Process { get; init; }
         [JsonPropertyName("verify")] public bool? Verify { get; init; }
@@ -266,6 +285,13 @@ public static class PilotApi
         [JsonPropertyName("condition")] public WaitReq? Condition { get; init; }    // tool=wait
         [JsonPropertyName("timeout_s")] public int? TimeoutS { get; init; }
         [JsonPropertyName("interval_ms")] public int? IntervalMs { get; init; }
+    }
+
+    public sealed record FileWriteReq
+    {
+        [JsonPropertyName("path")] public string? Path { get; init; }
+        [JsonPropertyName("text")] public string? Text { get; init; }         // utf-8 text body
+        [JsonPropertyName("b64")] public string? B64 { get; init; }           // or base64 bytes (ignored when Text present)
     }
 
     public sealed record WaitReq

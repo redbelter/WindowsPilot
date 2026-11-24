@@ -95,7 +95,9 @@ or `?token=<token>`.
 | `GET /api/tree?ref=` · `/api/find` · `/api/element?ref=` | actionable-first UIA |
 | `POST /api/screenshot` | `marks: true` → set-of-marks overlay |
 | `GET /api/shots/{id}` | captured JPEG |
-| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/toggle/expand/select/launch/kill/run/wait; replies `{ok,data:{job:"<id>"}}` |
+| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/toggle/expand/select/launch/kill/run/write_file/wait; replies `{ok,data:{job:"<id>"}}` |
+| `GET /api/files?path=&max=` · `/api/file?path=` | browse a directory / read a file (text or base64, `max_chars` cap); relative paths anchor on the data dir |
+| `POST /api/file` | write `{path,text}` or `{path,b64}` — creates parent dirs, audited |
 | `GET /api/jobs` · `/api/job?id=` | job list / single job (hyperv dashboard shape) |
 | `POST /api/wait` | server-side conditions: element/window/foreground/focused/text/pixel/action_settled |
 | `GET /api/audit` | JSONL audit tail (`csv=1` for export) |
@@ -106,7 +108,7 @@ governance, error taxonomy, performance budgets).
 
 ## Verified
 
-End-to-end rig against a Hyper-V Server-2025 guest: **29/29** — status,
+End-to-end rig against a Hyper-V Server-2025 guest: **35/35** — status,
 arm/act scopes, launch+find Notepad, UIA value write read back
 (`HELLO-PILOT-42`), coordinate click, screenshot marks, `stale_ref`
 self-heal, panic hotkey, MCP `tools/call` with structured errors, audit
@@ -137,7 +139,7 @@ kill through `/api/act` jobs, findings through `/api/find`).
 
 ## Governance rig
 
-`tests/windowspilot_rig.py` is the deeper contract check (29 assertions: arm
+`tests/windowspilot_rig.py` is the deeper contract check (35 assertions: arm
 state machine, panic hotkey, verify bundles with before/after shots, audit
 trail, coordinate clicks, MCP `tools/list` + `tools/call` with structured
 errors, console serving). It needs a **rig-profile** target

@@ -460,4 +460,62 @@ $('#ckDrive').onchange = async e => {
   catch (err) { toast('drive arm failed: ' + err.message); $('#ckDrive').checked = false; driveOn = false; $('#driveLock').hidden = true; }
 };
 
+// ---------- Files pane: browse / download / upload over the same seam ------
+let fCur = '';                                            // current relative dir
+async function fList(path) {
+  fCur = path || '';
+  $('#fPath').value = fCur;
+  try {
+    const d = await api('/files?path=' + encodeURIComponent(fCur) + '&max=2000');
+    const el = $('#fileList');
+    el.innerHTML = '';
+    for (const it of d.items) {
+      const row = document.createElement('div');
+      row.className = 'trow';
+      row.textContent = it.name + (it.type === 'file' ? '  ' + it.mtime + '  ' + it.size + 'B' : '');
+      row.onclick = () => (it.type === 'dir' ? fList((fCur ? fCur.replace(/\/+$/, '') + '/' : '') + it.name.replace(/\/+$/, '')) : fShow((fCur ? fCur + '/' : '') + it.name));
+      el.appendChild(row);
+    }
+    $('#fileView').textContent = '';
+    $('#tgtDirInfo') && ($('#tgtDirInfo').textContent = d.path);
+  } catch (e) { toast('files: ' + e.message); }
+}
+async function fShow(rel) {
+  try {
+    const d = await api('/file?path=' + encodeURIComponent(rel) + '&max_chars=200000');
+    const v = $('#fileView');
+    v.textContent = '';
+    if (d.encoding === 'binary' && d.b64) {
+      const img = document.createElement('img');
+      img.src = 'data:image/' + (rel.match(/\.(png|gif|svg|webp)$/i) ? RegExp.$1 : 'jpeg') + ';base64,' + d.b64;
+      img.style.cssText = 'max-width:100%;max-height:24vh;border-radius:6px';
+      v.appendChild(img);
+    } else {
+      v.textContent = (d.text || '') + (d.truncated ? '\n… truncated (' + d.size + ' bytes)' : '');
+    }
+    // save link
+    const a = document.createElement('a');
+    a.textContent = ' ⤓ ' + rel.split(/[\\/]/).pop();
+    a.href = '#'; a.className = 'chip'; a.style.marginLeft = '6px';
+    a.onclick = async () => { const dd = await api('/file?path=' + encodeURIComponent(rel) + '&max_chars=2000000');
+      const blob = dd.encoding === 'binary' ? await (await fetch('data:image/jpeg;base64,' + dd.b64)).blob()
+                                            : new Blob([dd.text || ''], { type: 'text/plain' });
+      a.href = URL.createObjectURL(blob); a.download = rel.split(/[\\/]/).pop(); a.click(); };
+    v.appendChild(a);
+  } catch (e) { toast('read: ' + e.message); }
+}
+$('#fGo').onclick = () => fList($('#fPath').value.trim());
+$('#fPath').onkeydown = e => { if (e.key === 'Enter') fList($('#fPath').value.trim()); };
+$('#fUp').onclick = () => fList(fCur.replace(/[^\\/]+[\\/]*$/, '').replace(/[\\/]+$/, ''));
+$('#upFile').onchange = async e => {
+  const files = [].slice.call(e.target.files || []);
+  for (const f of files) {
+    const b64 = await new Promise(res => { const r2 = new FileReader(); r2.onload = () => res(r2.result.split(',')[1]); r2.readAsDataURL(f); });
+    try { await job('write_file', { path: (fCur ? fCur + '/' : '') + f.name, b64 }); logLine('uploaded ' + f.name); }
+    catch (err) { toast('upload ' + f.name + ': ' + err.message); }
+  }
+  e.target.value = '';
+  fList(fCur);
+};
+
 window.addEventListener('error', e => logLine('js: ' + e.message));

@@ -37,7 +37,13 @@ def req(method, path, body=None, h=ACT, timeout=90):
     r = urllib.request.Request(url, data=data, method=method,
         headers={"Content-Type": "application/json",
                  **({"Autho" + "rization": "Bear" + "er " + h} if h else {})})
-    with urllib.request.urlopen(r, timeout=timeout) as resp:
+    try:
+        resp = urllib.request.urlopen(r, timeout=timeout)
+    except urllib.error.HTTPError as he:      # structured 400 bodies are part of the contract
+        raw = he.read()
+        try: return json.loads(raw)
+        except Exception: raise
+    with resp:
         raw = resp.read()
         ct = resp.headers.get("Content-Type", "")
         if "json" in ct:
@@ -202,6 +208,18 @@ def main():
     w = act("run", cmd="cmd.exe", args="/c exit 3", timeout_s=20)
     rr2 = w.get("result") or {}
     check("run surfaces nonzero exit", rr2.get("exit_code") == 3, str(rr2)[:120])
+    # ---- file browse + transfer over the same seam ----
+    fl = req("GET", "/api/files?max=50")
+    fd = fl.get("data", fl)
+    check("files lists data dir", fd.get("ok") is None and isinstance(fd.get("items"), list), str(fd)[:120])
+    act("write_file", path="rig/probe.txt", text="PILOT-FILE-OK é中文")
+    fr = req("GET", "/api/file?path=rig/probe.txt")
+    frd = fr.get("data", fr)
+    check("write_file then read round-trips utf-8",
+          "PILOT-FILE-OK" in (frd.get("text") or "") and frd.get("encoding") == "utf-8", str(frd)[:140])
+    check("nested dir auto-created", (frd.get("path") or "").replace("\\", "/").endswith("rig/probe.txt"), str(frd.get("path"))[:100])
+    fb = req("GET", "/api/file?path=rig/nope-missing.txt")
+    check("missing file returns structured err", fb.get("ok") is False and fb.get("error") == "not_found", str(fb)[:120])
     # ---- server-side wait verb: matched / ok-on-timeout ----
     w = act("wait", condition={"type": "window_opened", "process": "notepad"}, timeout_s=10)
     wr = w.get("result") or {}
@@ -214,13 +232,13 @@ def main():
     jl = req("GET", "/api/jobs").get("data", {})
     check("jobs list carries done job", any(j.get("status") == "done" for j in jl.get("jobs", [])), len(jl.get("jobs", [])))
     env_ok = True
-    for pth in ("/api/log?since=0", "/api/events?since=0", "/api/audit?limit=5", "/api/jobs"):
+    for pth in ("/api/log?since=0", "/api/events?since=0", "/api/audit?limit=5", "/api/jobs", "/api/files?max=5"):
         try:
             body = req("GET", pth)
             env_ok = env_ok and body.get("ok") is True and "data" in body
         except Exception:
             env_ok = False
-    check("envelope uniform (log/events/audit/jobs)", env_ok)
+    check("envelope uniform (log/events/audit/jobs/files)", env_ok)
     # ---- arm TTL surfaces an expiry in status ----
     req("POST", "/api/arm", {"scope": "act", "ttl_min": 5, "why": "rig-ttl"})
     st3 = req("GET", "/api/status")["data"]
