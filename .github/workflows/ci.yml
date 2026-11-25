@@ -38,7 +38,9 @@ jobs:
         shell: pwsh
         run: |
           Push-Location src/Pilot
-          dotnet publish -c Release -o ../../publish_out
+          # self-contained: GUI-subsystem exe must boot without hunting for
+          # the shared Windows Desktop runtime on the runner
+          dotnet publish -c Release -r win-x64 --self-contained true -o ../../publish_out
           Pop-Location
           # deterministic tokens so suites can carry a named act token
           $dir = "$env:LOCALAPPDATA\WindowsPilot"
