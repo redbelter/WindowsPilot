@@ -79,14 +79,17 @@ public sealed class PilotTools(PilotEngine engine, ArmState arm, KillSwitch kill
     [McpServerTool, Description(
         "Screenshot. marks:true draws numbered boxes over actionable UIA elements and returns the mark→ref map — " +
         "click a MARK NUMBER via pilot_click(mark=n) (resolves to the ref, pattern-first; never blind pixels). " +
-        "Empty marks = canvas UI (tree is a black box): fall back to coordinate clicks using source_origin+scale to " +
-        "inverse-map image pixels to real coordinates. image_url is served at the returned path (HTTP-reachable host).")]
+        "words alongside give OCR boxes [{text,x,y,w,h}] in IMAGE-space px — canvas apps (self-drawn UI, no_uia_marks) " +
+        "are readable without an external OCR round-trip; feed those coords straight to pilot_click with shot:true. " +
+        "Empty marks = canvas UI: fall back to coordinate clicks (shot:true takes image px directly). " +
+        "image_url is served at the returned path (HTTP-reachable host).")]
     public Task<CallToolResult> Pilot_screenshot(
         int monitor = 0, bool marks = true,
         [Description("longest edge px, default 1568 (vision-model sweet spot)")] int max_edge = 1568,
         [Description("jpeg quality 30-95")] int quality = 70,
-        [Description("capture one window by hwnd instead of a monitor")] string? hwnd = null) =>
-        Guard(async () => await engine.ScreenshotAsync(monitor, marks, max_edge, quality, hwnd));
+        [Description("capture one window by hwnd instead of a monitor")] string? hwnd = null,
+        [Description("run offline OCR and return word boxes (default on; false for pure-image shot)")] bool ocr = true) =>
+        Guard(async () => await engine.ScreenshotAsync(monitor, marks, max_edge, quality, hwnd, ocr));
 
     [McpServerTool, Description("Tail the activity ring (focus changes, windows, arm/panic, job transitions). since=last n you saw.")]
     public JsonElement Pilot_get_events(long since = 0, int max = 100) =>
@@ -108,19 +111,22 @@ public sealed class PilotTools(PilotEngine engine, ArmState arm, KillSwitch kill
     // verification bundle (before/after shots + tree_delta) unless verify:false.
 
     [McpServerTool, Description(
-        "Click. PREFER ref (pattern-focus + center click) or mark=n (resolves mark→ref). x,y are PHYSICAL px — " +
-        "inverse-map screenshot pixels with source_origin+scale first. Refs die when the UI rebuilds: a stale_ref " +
-        "error carries `was` — re-find with its name/automation_id, then retry ONCE.")]
+        "Click. PREFER ref (pattern-focus + center click) or mark=n (resolves mark→ref). Coords: default PHYSICAL px; " +
+        "shot:true means x,y are screenshot IMAGE px and the server inverse-maps via the last shot's scale+origin " +
+        "(OCR word boxes from pilot_screenshot are image-space — click them with shot:true, no manual math). " +
+        "Refs die when the UI rebuilds: the engine auto-rebinds stale refs once by fingerprint; if it still fails " +
+        "the stale_ref error carries `was` — re-find with its name/automation_id, then retry ONCE.")]
     public Task<CallToolResult> Pilot_click(string? @ref = null, int? x = null, int? y = null,
         [Description("left|right|middle")] string button = "left", int clicks = 1,
         [Description("mark number from a marks screenshot (takes precedence over ref/x,y)")] int? mark = null,
+        [Description("x,y are screenshot-image px (mapped via last shot's scale)")] bool shot = false,
         bool verify = true)
     {
         return Guard(async () =>
         {
             string? r = @ref;
             if (mark is not null) r = ResolveMark(mark.Value);
-            return await engine.ClickAsync(Cx(), r, x, y, button, clicks, verify);
+            return await engine.ClickAsync(Cx(), r, x, y, button, clicks, verify, shot);
         });
     }
 
@@ -153,6 +159,13 @@ public sealed class PilotTools(PilotEngine engine, ArmState arm, KillSwitch kill
     [McpServerTool, Description("Set a ValuePattern element's text directly (search boxes, address bars) — fastest, no focus.")]
     public Task<CallToolResult> Pilot_set_value(string @ref, string value, bool verify = true) =>
         Guard(async () => await engine.SetValueAsync(Cx(), @ref, value, verify));
+
+    [McpServerTool, Description(
+        "Force a window to foreground by PROCESS NAME (optional title substring). Replaces the click-around-the-edge " +
+        "dismiss dance when Narrator / Search overlays steal focus: SetForeground + BringToTop + restore-if-minimized, " +
+        "then a re-verify read of the real foreground. Returns {hwnd,focused,foreground_title}.")]
+    public Task<CallToolResult> Pilot_focus_window(string process, string? title_contains = null, int timeout_ms = 3000) =>
+        Guard(async () => await engine.FocusWindowAsync(Cx(), process, title_contains, timeout_ms));
 
     [McpServerTool, Description("Invoke a button/menu-item (InvokePattern). Works on offscreen/minimized UI where pixel clicks can't reach.")]
     public Task<CallToolResult> Pilot_invoke(string @ref, bool verify = true) =>

@@ -130,7 +130,7 @@ public static class PilotApi
         api.MapGet("/element_at", async (PilotEngine e, int x, int y) => await Wrap(() => e.ElementAtAsync(x, y)));
 
         api.MapPost("/screenshot", async (ShotReq req, PilotEngine e) =>
-            await Wrap(() => e.ScreenshotAsync(req.Monitor ?? 0, req.Marks ?? true, req.MaxEdge ?? 1568, req.Quality ?? 70, req.Hwnd)));
+            await Wrap(() => e.ScreenshotAsync(req.Monitor ?? 0, req.Marks ?? true, req.MaxEdge ?? 1568, req.Quality ?? 70, req.Hwnd, req.Ocr ?? true)));
 
         api.MapGet("/events", (EventHub hub, long? since, int? max) =>
             Results.Json(new { ok = true, data = new { log = hub.Since(since ?? 0, max ?? 200)
@@ -142,7 +142,7 @@ public static class PilotApi
             var cx = ctx.Ctx();
             var jid = jobs.Spawn(req.Tool, async _ => req.Tool switch
             {
-                "click" => await e.ClickAsync(cx, req.Mark is int mk ? ResolveMark(mk) : req.Req, req.X, req.Y, req.Button ?? "left", req.Clicks ?? 1, req.Verify ?? true),
+                "click" => await e.ClickAsync(cx, req.Mark is int mk ? ResolveMark(mk) : req.Req, req.X, req.Y, req.Button ?? "left", req.Clicks ?? 1, req.Verify ?? true, req.Shot ?? false),
                 "drag" => await e.DragAsync(cx, req.Req, req.X1, req.Y1, req.X2 ?? 0, req.Y2 ?? 0, req.Steps ?? 12, req.DurationMs ?? 400, req.Verify ?? true),
                 "scroll" => await e.ScrollAsync(cx, req.Req, req.X, req.Y, req.DeltaY ?? 0, req.DeltaX ?? 0, false),
                 "type" => await e.TypeTextAsync(cx, req.Text ?? "", req.Req, req.Mode ?? "auto", req.Verify ?? true),
@@ -150,6 +150,7 @@ public static class PilotApi
                 "value" => await e.SetValueAsync(cx, req.Req ?? "", req.Value ?? req.Text ?? "", req.Verify ?? true),
                 "invoke" => await e.InvokeAsync(cx, req.Req ?? "", req.Verify ?? true),
                 "focus" => await e.FocusAsync(cx, req.Req ?? "", req.Verify ?? true),
+                "focus_window" => await e.FocusWindowAsync(cx, req.Process ?? req.Cmd ?? "", req.TitleContains, req.TimeoutMs ?? 3000),
                 "toggle" => await e.ToggleAsync(cx, req.Req ?? "", req.Verify ?? true),
                 "expand" => await e.ExpandAsync(cx, req.Req ?? "", req.Expand ?? true, req.Verify ?? true),
                 "select" => await e.SelectAsync(cx, req.Req ?? "", req.Verify ?? true),
@@ -162,7 +163,7 @@ public static class PilotApi
                             "{\"type\":\"element_appears\",\"query\":{...}} | window_opened {process|title_regex} | text_matches {ref,contains} ..."),
                     req.TimeoutS ?? 30, req.IntervalMs ?? 250),
                 _ => throw new PilotException("not_found", $"unknown act tool '{req.Tool}'",
-                    "click drag scroll type keys value invoke focus toggle expand select launch kill run write_file wait"),
+                    "click drag scroll type keys value invoke focus focus_window toggle expand select launch kill run write_file wait"),
             });
             return Results.Json(new { ok = true, data = new { job = jid } });
         });
@@ -258,6 +259,7 @@ public static class PilotApi
     {
         [JsonPropertyName("monitor")] public int? Monitor { get; init; } [JsonPropertyName("marks")] public bool? Marks { get; init; }
         [JsonPropertyName("max_edge")] public int? MaxEdge { get; init; } [JsonPropertyName("quality")] public int? Quality { get; init; } [JsonPropertyName("hwnd")] public string? Hwnd { get; init; }
+        [JsonPropertyName("ocr")] public bool? Ocr { get; init; }
     }
 
     public sealed record ActReq
@@ -281,9 +283,12 @@ public static class PilotApi
         [JsonPropertyName("pid")] public int? Pid { get; init; } [JsonPropertyName("process")] public string? Process { get; init; }
         [JsonPropertyName("verify")] public bool? Verify { get; init; }
         [JsonPropertyName("mark")] public int? Mark { get; init; }                   // marks-screenshot number
+        [JsonPropertyName("shot")] public bool? Shot { get; init; }                   // click coords in image-space px
         [JsonPropertyName("value")] public string? Value { get; init; }             // set_value payload (alias: text)
+        [JsonPropertyName("title_contains")] public string? TitleContains { get; init; }  // focus_window
         [JsonPropertyName("condition")] public WaitReq? Condition { get; init; }    // tool=wait
         [JsonPropertyName("timeout_s")] public int? TimeoutS { get; init; }
+        [JsonPropertyName("timeout_ms")] public int? TimeoutMs { get; init; }       // focus_window wait budget
         [JsonPropertyName("interval_ms")] public int? IntervalMs { get; init; }
     }
 

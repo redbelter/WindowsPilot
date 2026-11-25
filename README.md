@@ -98,13 +98,13 @@ or `?token=<token>`.
 | `GET /api/status` | arm state, session id, version, uptime |
 | `GET /api/windows` · `/api/foreground` | taskbar-semantic window list (EnumWindows) |
 | `GET /api/tree?ref=` · `/api/find` · `/api/element?ref=` | actionable-first UIA |
-| `POST /api/screenshot` | `marks: true` → set-of-marks overlay |
+| `POST /api/screenshot` | `marks: true` → set-of-marks overlay; `ocr: true` (default) adds `words[{text,x,y,w,h}]` word boxes in image-space px |
 | `GET /api/shots/{id}` | captured JPEG |
-| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/toggle/expand/select/launch/kill/run/write_file/wait; replies `{ok,data:{job:"<id>"}}` |
+| `POST /api/act` | verb set: click/drag/scroll/type/keys/value/invoke/focus/focus_window/toggle/expand/select/launch/kill/run/write_file/wait; replies `{ok,data:{job:"<id>"}}`. `click` accepts `shot:true` to feed screenshot-space px directly |
 | `GET /api/files?path=&max=` · `/api/file?path=` | browse a directory / read a file (text or base64, `max_chars` cap); relative paths anchor on the data dir |
 | `POST /api/file` | write `{path,text}` or `{path,b64}` — creates parent dirs, audited |
 | `GET /api/jobs` · `/api/job?id=` | job list / single job (hyperv dashboard shape) |
-| `POST /api/wait` | server-side conditions: element/window/foreground/focused/text/pixel/action_settled |
+| `POST /api/wait` | server-side conditions: element/window/foreground/focused/text/pixel/action_settled/ocr_text/pixel_stable |
 | `GET /api/audit` | JSONL audit tail (`csv=1` for export) |
 | `GET /ws/view` | live frame WebSocket |
 
@@ -113,9 +113,10 @@ governance, error taxonomy, performance budgets).
 
 ## Verified
 
-End-to-end rig against a Hyper-V Server-2025 guest: **35/35** — status,
+End-to-end rig against a Hyper-V Server-2025 guest: **39/39** — status,
 arm/act scopes, launch+find Notepad, UIA value write read back
-(`HELLO-PILOT-42`), coordinate click, screenshot marks, `stale_ref`
+(`HELLO-PILOT-42`), coordinate click, screenshot marks, OCR word boxes,
+`focus_window` by process name, shot-space click, `ocr_text` wait, `stale_ref`
 self-heal, panic hotkey, MCP `tools/call` with structured errors, audit
 trail, console serving.
 

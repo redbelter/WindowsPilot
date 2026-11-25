@@ -148,7 +148,7 @@ public sealed class PilotEngine(
 
     // ========================= screenshot + marks =========================
 
-    public async Task<object> ScreenshotAsync(int monitor, bool marks, int maxEdge, int quality, string? hwndHex)
+    public async Task<object> ScreenshotAsync(int monitor, bool marks, int maxEdge, int quality, string? hwndHex, bool ocr = true)
     {
         maxEdge = Math.Clamp(maxEdge, 320, 4096);
         quality = Math.Clamp(quality, 30, 95);
@@ -171,6 +171,20 @@ public sealed class PilotEngine(
 
         // verification shots save to disk for audit/Operator tab (design §8.3)
         string shotId = SaveShot(jpeg);
+        LastShotMap.Update(frame.Meta);   // click(shot:true) inverse-maps via THIS transform
+
+        // side-car OCR (design §7 companion): word boxes in IMAGE-space px so
+        // canvas apps (self-drawn UI, ~no UIA) are readable without an external
+        // OCR round-trip. Boxes share the shot's scale — click(shot:true) eats them.
+        List<Vision.OcrWord> words = [];
+        double ocrMs = 0;
+        if (ocr)
+        {
+            var swOcr = System.Diagnostics.Stopwatch.StartNew();
+            words = OcrService.RecognizeWords(jpeg);
+            ocrMs = swOcr.ElapsedMilliseconds;
+        }
+
         return new
         {
             image_url = $"/api/shots/{shotId}.jpg",
@@ -178,6 +192,7 @@ public sealed class PilotEngine(
             scale = frame.Meta.Scale, source_origin = frame.Meta.SourceOrigin,
             monitor = frame.Meta.Monitor, capture_tier = frame.Meta.CaptureTier,
             marks = picked ?? [],
+            words, ocr_ms = ocr ? ocrMs : (double?)null,
             empty_marks_hint = picked is { Count: 0 } && marks
                 ? "no_uia_marks, use coordinate clicks (canvas UI)" : null,
         };
@@ -357,13 +372,81 @@ public sealed class PilotEngine(
 
     // ======================= mutation entry points =======================
 
-    public Task<VerifyBundle> ClickAsync(CallContext cx, string? r, int? x, int? y, string button, int clicks, bool verify)
-        => Mutate(cx, "pilot_click", new { @ref = r, x, y, button, clicks }, verify, async () =>
+    public Task<VerifyBundle> ClickAsync(CallContext cx, string? r, int? x, int? y, string button, int clicks, bool verify, bool shot)
+        => Mutate(cx, "pilot_click", new { @ref = r, x, y, button, clicks, shot }, verify, async () =>
         {
             if (r is not null) { await uia.RunPattern(r, "focus", null); var pt = await CenterOf(r); await input.Click(pt.x, pt.y, button, clicks); }
-            else if (x is not null && y is not null) await input.Click(x.Value, y.Value, button, clicks);
+            else if (x is not null && y is not null)
+            {
+                // shot:true: coords are screenshot-image px, mapped back through the
+                // last shot's scale+origin server-side so clients never multiply by 1/scale.
+                var pt = shot ? LastShotMap.ToPhysical(x.Value, y.Value) : ((int x, int y))(x.Value, y.Value);
+                await input.Click(pt.x, pt.y, button, clicks);
+            }
             else throw new PilotException("not_found", "click needs a ref or x,y", "pass ref (preferred) or coordinates");
         });
+
+    /// <summary>Force a window to foreground by process name (title substring
+    /// optional). Survives the Narrator/Search-overlay steal dance: SetForeground
+    /// + topmost nudge + a re-verify read of GetForegroundWindow. Returns what's
+    /// foreground now so callers branch without another screenshot.</summary>
+    public async Task<object> FocusWindowAsync(CallContext cx, string process, string? titleContains, int timeoutMs)
+    {
+        guard.CheckMutation(arm, ArmScope.act, ForegroundProcess().proc);
+        RateCheck();
+        var sw = Stopwatch.StartNew();
+        var deadline = DateTime.UtcNow.AddMilliseconds(Math.Clamp(timeoutMs, 100, 15000));
+        string? matched = null; IntPtr best = IntPtr.Zero;
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var t in UiaService.NativeTopWindows())
+            {
+                try
+                {
+                    using var proc = Process.GetProcessById(t.Pid);
+                    if (!proc.ProcessName.Equals(process, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (titleContains is { Length: > 0 } &&
+                        t.Title.IndexOf(titleContains, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    best = t.Hwnd; matched = proc.ProcessName; break;
+                }
+                catch { }
+            }
+            if (best != IntPtr.Zero) break;
+            await Task.Delay(120);
+        }
+        if (best == IntPtr.Zero)
+            throw PilotException.NotFound($"no top-level window for process '{process}'" +
+                (titleContains is null ? "" : $" title~'{titleContains}'"));
+
+        if (Native.IsIconic(best)) Native.ShowWindow(best, Native.SW_RESTORE);
+        Native.BringWindowToTop(best);
+        Native.SetForegroundWindow(best);
+
+        // re-verify read: who actually owns foreground now?
+        string? fgTitle = null; bool fgOk = false;
+        for (int i = 0; i < 10 && !fgOk; i++)
+        {
+            await Task.Delay(40);
+            var fg = Native.GetForegroundWindow();
+            fgOk = fg == best;
+            if (!fgOk && fg != IntPtr.Zero)
+            {
+                // a shell overlay grabbed it — one retry of the pair
+                Native.BringWindowToTop(best); Native.SetForegroundWindow(best);
+            }
+            if (fg != IntPtr.Zero) fgTitle = UiaService.TitleOfNative(fg);
+        }
+        events.Push("window_focus", new { process, hwnd = "0x" + best.ToInt64().ToString("x"), fg_ok = fgOk });
+        try
+        {
+            audit.Write(cx.Host, cx.TokenScope, "pilot_focus_window", new { process, title_contains = titleContains },
+                target: new { hwnd = "0x" + best.ToInt64().ToString("x") },
+                guard: new { armed = arm.Info.Armed },
+                res: new { ok = fgOk, ms = sw.ElapsedMilliseconds });
+        }
+        catch (Exception ae) { log.LogWarning("audit write failed: {Err}", ae.Message); }
+        return new { hwnd = "0x" + best.ToInt64().ToString("x"), focused = fgOk, foreground_title = fgTitle, ms = sw.ElapsedMilliseconds };
+    }
 
     public Task<VerifyBundle> DragAsync(CallContext cx, string? r, int? x1, int? y1, int x2, int y2, int steps, int durationMs, bool verify)
         => Mutate(cx, "pilot_drag", new { @ref = r, x1, y1, x2, y2, steps, duration_ms = durationMs }, verify, async () =>
@@ -486,7 +569,7 @@ public sealed class PilotEngine(
     // ========================== wait_for ==========================
 
     public Task<WaitForResult> WaitForAsync(WaitCondition cond, int timeoutS, int intervalMs)
-        => new Waiter(uia, events).WaitAsync(cond, Math.Clamp(timeoutS, 1, 600), Math.Max(50, intervalMs));
+        => new Waiter(uia, events, capture).WaitAsync(cond, Math.Clamp(timeoutS, 1, 600), Math.Max(50, intervalMs));
 
     // ========================== headless run ==========================
     // Direct program execution with captured output — the layer agents
@@ -658,6 +741,6 @@ public static class ToolSurface
         "pilot_get_audit",
         "pilot_click", "pilot_drag", "pilot_scroll", "pilot_type_text", "pilot_press_keys",
         "pilot_set_value", "pilot_invoke", "pilot_toggle", "pilot_expand", "pilot_select",
-        "pilot_launch_app", "pilot_kill_app", "pilot_arm", "pilot_panic",
+        "pilot_focus_window", "pilot_launch_app", "pilot_kill_app", "pilot_arm", "pilot_panic",
     ];
 }

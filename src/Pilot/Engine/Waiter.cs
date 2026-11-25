@@ -1,4 +1,5 @@
 using WindowsPilot.Core;
+using WindowsPilot.Engine.Capture;
 using WindowsPilot.Engine.Uia;
 
 namespace WindowsPilot.Engine;
@@ -10,7 +11,7 @@ namespace WindowsPilot.Engine;
 /// </summary>
 public sealed class WaitCondition
 {
-    public string Type { get; set; } = "";           // element_appears|element_gone|window_opened|window_closed|window_foreground|focused|text_matches|pixel_stable|action_settled
+    public string Type { get; set; } = "";           // element_appears|element_gone|window_opened|window_closed|window_foreground|focused|text_matches|pixel_stable|action_settled|ocr_text
     public FindQuery? Query { get; set; }
     public string? TitleRegex { get; set; }
     public string? Process { get; set; }
@@ -20,7 +21,7 @@ public sealed class WaitCondition
     public int ForMs { get; set; } = 800;             // pixel_stable / action_settled window
 }
 
-public sealed class Waiter(UiaService uia, EventHub events)
+public sealed class Waiter(UiaService uia, EventHub events, CaptureService capture)
 {
     public async Task<WaitForResult> WaitAsync(WaitCondition c, int timeoutS, int intervalMs)
     {
@@ -38,9 +39,10 @@ public sealed class Waiter(UiaService uia, EventHub events)
                 "window_foreground" => await ProbeForeground(c),
                 "focused" => await ProbeElement(c, expect: true, focusedOnly: true),
                 "text_matches" => await ProbeText(c),
+                "ocr_text" => await ProbeOcrText(c),
                 "pixel_stable" or "action_settled" => await ProbeSettled(c),
                 _ => throw new PilotException("not_found", $"unknown wait condition '{c.Type}'",
-                    "types: element_appears element_gone window_opened window_closed window_foreground focused text_matches pixel_stable action_settled"),
+                    "types: element_appears element_gone window_opened window_closed window_foreground focused text_matches ocr_text pixel_stable action_settled"),
             };
             if (hit is not null)
                 return new WaitForResult { Matched = true, WaitedMs = (long)(DateTime.UtcNow - started).TotalMilliseconds, Detail = hit };
@@ -117,13 +119,41 @@ public sealed class Waiter(UiaService uia, EventHub events)
         return hit ? node with { TextSnippet = text } : null;
     }
 
+    async Task<NodeDto?> ProbeOcrText(WaitCondition c)
+    {
+        // canvas-UI read-back: OCR the live screen and match, collapses the
+        // screenshot→OCR→compare dance into one bounded poll (design §17).
+        if (c.Contains is null && c.Regex is null)
+            throw new PilotException("not_found", "ocr_text needs contains or regex",
+                "{\"type\":\"ocr_text\",\"contains\":\"...\")");
+        var frame = await Task.Run(() => capture.CaptureScreen(0));
+        var words = await Task.Run(() => Vision.OcrService.RecognizeWords(frame.Jpeg));
+        var text = string.Join(" ", words.Select(w => w.Text));
+        // word boxes split tokens; compare whitespace-insensitively so "PW 7185"
+        // still satisfies contains("PW7185")
+        var tight = string.Concat(words.Select(w => w.Text));
+        bool Hit(string hay) => c.Regex is not null
+            ? System.Text.RegularExpressions.Regex.IsMatch(hay, c.Regex, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(200))
+            : hay.Contains(c.Contains!, StringComparison.OrdinalIgnoreCase);
+        bool hit = Hit(text) || Hit(tight);
+        return hit ? new NodeDto { Ref = "-", Name = "ocr", TextSnippet = text.Length > 200 ? text[..200] : text } : null;
+    }
+
     async Task<NodeDto?> ProbeSettled(WaitCondition c)
     {
-        // UIA-quiet proxy: no new hub events across a full ForMs window ⇒ settled.
-        // (Shot-diff based pixel_stable is the P2 upgrade; this keeps agents from
-        // hammering screenshots while an animation/dialog settles.)
-        long before = events.SinceSeq;
+        // Pixel-truth stability: two captures a ForMs window apart that look the
+        // same (8x8 grayscale phash, CaptureService.LooksChanged) ⇒ settled. This
+        // is what render/animation waits actually want — canvas UIs push zero UIA
+        // events, so the old event-quiet proxy matched instantly and lied.
+        var first = await Task.Run(() => capture.CaptureScreen(0));
         await Task.Delay(c.ForMs);
-        return events.SinceSeq == before ? new NodeDto { Ref = "-", Name = "settled" } : null;
+        var second = await Task.Run(() => capture.CaptureScreen(0));
+        using var a = new System.Drawing.Bitmap(new MemoryStream(first.Jpeg));
+        using var b = new System.Drawing.Bitmap(new MemoryStream(second.Jpeg));
+        if (CaptureService.LooksChanged(a, b)) return null;
+        // belt+braces: also require the UIA lane to be quiet
+        long seqA = events.SinceSeq;
+        await Task.Delay(Math.Max(50, c.ForMs / 4));
+        return events.SinceSeq == seqA ? new NodeDto { Ref = "-", Name = "settled" } : null;
     }
 }

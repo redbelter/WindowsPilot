@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9
+- OCR side-car: `POST /api/screenshot` returns `words:[{text,x,y,w,h}]` (image-space px) alongside the JPEG via the built-in `Windows.Media.Ocr` engine — offline, deterministic, ~100 ms, no external round-trips. Covers self-drawn canvases (FL Studio) that expose almost nothing over UIA. Any OCR failure degrades to an empty list; the shot always succeeds. `ocr:false` opts out.
+- `focus_window` act verb + `pilot_focus_window` MCP tool: force foreground by process name (optional title substring) with `SetForegroundWindow`+`BringWindowToTop`+`ShowWindow(RESTORE)` and a re-verify poll — replaces the click-around-the-edge dismiss dance when Narrator/Search overlays steal focus. Replies `{hwnd,focused,foreground_title}`.
+- Shot-space clicks: `click` accepts `shot:true` and consumes screenshot-space px, inverse-mapping through the last shot's scale + source origin (`LastShotMap`) — clients no longer multiply by 1/scale themselves.
+- Stale-ref auto-rebind: a dead ref gets one cheap re-find against the fresh top-window forest (automation_id/name/class + last-known rect proximity via `FingerprintDto.Rect`); the OLD ref keeps working on the fresh element. Only a missed rebind throws `stale_ref`, and the error carries the fingerprint.
+- `wait_until` gains `ocr_text` (contains/regex against live OCR, whitespace-tolerant) and `pixel_stable` (two frames `for_ms` apart, diff ratio under threshold) — collapses fixed sleep chains into one bounded call.
+- Rig: 35→39 assertions covering all four surfaces.
+
 ## 0.1.8
 - File surface: `GET /api/files` (browse), `GET /api/file` (read; utf-8/utf-16 sniff with BOM strip, binary → base64, `max_chars` head-slice + `truncated` flag), `POST /api/file` / act verb `write_file` (writes text or b64, creates parent dirs, audited). Relative paths anchor on the pilot data dir. MCP parity: `pilot_list_files` / `pilot_read_file` / `pilot_write_file`. Console gets a Files tab (browse, preview, download, multi-upload). Rig 31→35 assertions.
 

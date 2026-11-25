@@ -38,6 +38,20 @@ public sealed class UiaService : IAsyncDisposable
     {
         _cfg = cfg; Events = events; _log = logs.CreateLogger<UiaService>();
         Registry = new ElementRegistry();
+        // Stale-ref recovery (design §5): one cheap re-find by fingerprint before
+        // the error. Anchor on the old hwnd's window when it still exists, else
+        // the foreground window; proximity by last-known rect breaks ties.
+        Registry.RebindHook = fp =>
+        {
+            FlaUI.Core.AutomationElements.AutomationElement? root = null;
+            if (fp.Hwnd is { } hx)
+            {
+                try { root = Aut.FromHandle(UiaService.ParseH(hx)); } catch { }
+            }
+            root ??= TryFromHwnd(Native.GetForegroundWindow());
+            if (root is null) return null;
+            return ElementRegistry.MatchNear(root, fp);
+        };
         _sta = new Thread(Run) { Name = "pilot-uia", IsBackground = true };
         _sta.SetApartmentState(ApartmentState.STA);
         _sta.Start();

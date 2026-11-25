@@ -52,7 +52,10 @@ public sealed class ElementRegistry
         return id;
     }
 
-    /// <summary>Resolve a ref → live element. Throws PilotException.StaleRef otherwise.</summary>
+    /// <summary>Resolve a ref → live element. Dead refs get ONE cheap auto-rebind
+    /// via RebindHook (match by automation_id/name/class + rect proximity against
+    /// the fresh tree); only if that misses do we throw stale_ref. A successful
+    /// rebind keeps the OLD ref id working — clients never need to re-find.</summary>
     public Entry Resolve(string refId)
     {
         if (!_byId.TryGetValue(refId, out var e))
@@ -62,9 +65,75 @@ public sealed class ElementRegistry
             e.LastHit = DateTime.UtcNow;
             return e;
         }
-        // try ONE non-guessing liveness check for elements whose provider rebuilt
+        FlaUI.Core.AutomationElements.AutomationElement? fresh = null;
+        try { fresh = RebindHook?.Invoke(e.Fingerprint); } catch { }
+        if (fresh is not null && Alive(fresh))
+        {
+            var reb = new Entry { Id = refId, Element = fresh, Fingerprint = FingerprintOf(fresh) };
+            _byId[refId] = reb;               // old ref keeps working on the fresh element
+            return reb;
+        }
         _byId.TryRemove(refId, out _);
         throw PilotException.StaleRef(e.Fingerprint);
+    }
+
+    /// <summary>Set by UiaService: re-find a fingerprint's element in the current
+    /// tree (runs on the UIA STA thread — the caller's thread is fine too, FlaUI
+    /// proxies). Match order: automation_id > name > class, rect proximity tiebreak.</summary>
+    public Func<FingerprintDto, FlaUI.Core.AutomationElements.AutomationElement?>? RebindHook { get; set; }
+
+    /// <summary>Budgeted near-match search under one root (depth ≤ 6, ≤ 150 ms).
+    /// Shared by the rebind pass; returns the candidate closest to the old rect.</summary>
+    public static FlaUI.Core.AutomationElements.AutomationElement? MatchNear(
+        FlaUI.Core.AutomationElements.AutomationElement root, FingerprintDto fp)
+    {
+        FlaUI.Core.AutomationElements.AutomationElement? best = null;
+        double bestDist = double.MaxValue;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int seen = 0;
+        void Rec(FlaUI.Core.AutomationElements.AutomationElement el, int d)
+        {
+            if (best is not null && bestDist <= 8) return;                 // good enough
+            if (d > 6 || sw.ElapsedMilliseconds > 150 || ++seen > 2000) return;
+            if (FpMatch(el, fp))
+            {
+                double dist = RectDistance(el, fp);
+                if (dist < bestDist) { bestDist = dist; best = el; }
+            }
+            FlaUI.Core.AutomationElements.AutomationElement[] kids;
+            try { kids = el.FindAllChildren(); } catch { return; }
+            foreach (var k in kids) Rec(k, d + 1);
+        }
+        Rec(root, 0);
+        return best;
+    }
+
+    static bool FpMatch(FlaUI.Core.AutomationElements.AutomationElement el, FingerprintDto fp)
+    {
+        try
+        {
+            if (fp.AutomationId is { Length: > 0 })
+                return (el.AutomationId ?? "") == fp.AutomationId;
+            if (fp.Name is { Length: > 0 } nm)
+                return (el.Name ?? "").Contains(nm, StringComparison.OrdinalIgnoreCase);
+            if (fp.ClassName is { Length: > 0 } cls)
+                return (el.ClassName ?? "").Contains(cls, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { }
+        return false;
+    }
+
+    static double RectDistance(FlaUI.Core.AutomationElements.AutomationElement el, FingerprintDto fp)
+    {
+        if (fp.Rect is not { Length: 4 } orr) return 1;   // no rect info: first match wins
+        try
+        {
+            var r = el.BoundingRectangle;
+            double dx = r.X + r.Width / 2 - (orr[0] + orr[2] / 2.0);
+            double dy = r.Y + r.Height / 2 - (orr[1] + orr[3] / 2.0);
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+        catch { return 2; }
     }
 
     public FingerprintDto? FingerprintOf(string refId) =>
@@ -120,15 +189,22 @@ public sealed class ElementRegistry
     public static FingerprintDto FingerprintOf(FlaUI.Core.AutomationElements.AutomationElement el)
     {
         string? name = null, aid = null, cls = null, ctype = null, hwnd = null;
+        int[]? rect = null;
         try { name = el.Name; } catch { }
         try { aid = el.AutomationId; } catch { }
         try { cls = el.ClassName; } catch { }
         try { ctype = el.ControlType.ToString(); } catch { }
         try { hwnd = "0x" + el.Properties.NativeWindowHandle.ValueOrDefault.ToInt64().ToString("x"); } catch { }
+        try
+        {
+            var r = el.BoundingRectangle;
+            if (r.Width > 0 && r.Height > 0) rect = [(int)r.X, (int)r.Y, (int)r.Width, (int)r.Height];
+        }
+        catch { }
         return new FingerprintDto
         {
             Name = name, AutomationId = aid, ClassName = cls, ControlType = ctype, Hwnd = hwnd,
-            Path = PathOf(el),
+            Path = PathOf(el), Rect = rect,
         };
     }
 

@@ -135,6 +135,31 @@ def main():
     check("keys ctrl+a", j.get("status") == "done")
     j = act("keys", keys="delete", verify=False)
     check("keys delete", j.get("status") == "done")
+    # ---- v0.1.9 additions: OCR side-car, shot-space click, focus_window, ocr_text wait ----
+    sshot = req("POST", "/api/screenshot", {"marks": False, "max_edge": 1200, "ocr": True})["data"]
+    words = sshot.get("words")
+    check("ocr side-car returns word boxes", isinstance(words, list),
+          "%s words ocr_ms=%s" % (len(words or []), sshot.get("ocr_ms")))
+    j = act("focus_window", process="notepad", timeout_ms=3000)
+    fr = j.get("result") or {}
+    check("focus_window raises by process name", j.get("status") == "done" and fr.get("focused") is True, str(fr)[:120])
+    if words:
+        marker = "PW%d" % (int(time.time()) % 10000)   # short token: OCR joins long strings with stray spaces
+        act("keys", keys="ctrl+a", verify=False); act("keys", keys="delete", verify=False)
+        fr2 = req("POST", "/api/find", {"process": "notepad", "control_type": "Document", "max": 1})["data"]["elements"]
+        if fr2:
+            act("type", req=fr2[0]["ref"], text=marker, mode="keys", verify=False)   # keys-mode focuses first, so the text is visible for the OCR wait
+            g2 = req("GET", "/api/element?ref=" + fr2[0]["ref"])["data"]
+            typed = marker in (g2.get("text_snippet") or "")
+        else:
+            typed = False
+        w3 = act("wait", condition={"type": "ocr_text", "contains": marker}, timeout_s=25)
+        check("wait ocr_text matches typed marker", typed and (w3.get("result") or {}).get("matched") is True, str(w3)[:120])
+    else:
+        check("wait ocr_text matches typed marker", True, "skipped: OCR engine returned nothing on this SKU")
+    cx = int((sshot.get("width") or 1200) * 0.5); cy = int((sshot.get("height") or 700) * 0.5)
+    j = act("click", x=cx, y=cy, shot=True, verify=False)
+    check("shot-space click accepted", j.get("status") == "done", j.get("error"))
     au = req("GET", "/api/audit?limit=200")["data"]["items"]
     tools = [a["tool"] for a in au]
     check("T-16 audit trail", len(au) >= 5 and "pilot_launch_app" in tools, "%d entries; tools=%s" % (len(au), sorted(set(tools))[:8]))

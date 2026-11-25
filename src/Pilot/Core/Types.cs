@@ -82,6 +82,7 @@ public sealed record FingerprintDto
     [JsonPropertyName("automation_id")] public string? AutomationId { get; init; }
     [JsonPropertyName("class_name")] public string? ClassName { get; init; }
     [JsonPropertyName("path")] public string[]? Path { get; init; }
+    [JsonPropertyName("rect")] public int[]? Rect { get; init; }   // x,y,w,h — rebind proximity
 }
 
 /// <summary>Returned by every mutating tool unless verify:false (design §10).</summary>
