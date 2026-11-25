@@ -18,7 +18,8 @@ jobs:
         with: { python-version: '3.12' }
       - name: build (warnings are errors)
         working-directory: src/Pilot
-        run: dotnet build -c Release -p:TreatWarningsAsErrors=true -p:WarningsAsErrors=''
+        # net10.0-windows* TFMs on a Linux runner need the cross-targeting opt-in
+        run: dotnet build -c Release -p:TreatWarningsAsErrors=true -p:WarningsAsErrors='' -p:EnableWindowsTargeting=true
       - name: suites compile
         run: python -m py_compile tests/windowspilot_smoke.py tests/windowspilot_rig.py
 
