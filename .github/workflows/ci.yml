@@ -62,10 +62,11 @@ jobs:
             } catch { Start-Sleep -Seconds 1 }
           }
           # self-reporting failure: annotations only show the exit code, so push
-          # real diagnostics into the step summary (renders on the run page)
+          # diagnostics through BOTH channels — step summary + ::warning:: annotation
           $proc = @(Get-Process WindowsPilot -ErrorAction SilentlyContinue).Count
-          $logTail = if (Test-Path $log) { Get-Content $log -Tail 40 | Out-String } else { "(no pilot.log at $log)" }
+          $logTail = if (Test-Path $log) { (Get-Content $log -Tail 15) -join ' ~ ' } else { "(no pilot.log at $log)" }
           ("## health gate failed`n`n- WindowsPilot processes: $proc`n````n$logTail`n````") | Out-File -Append $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          Write-Output "::warning::pilot procs=$proc log: $logTail"
           Write-Error "pilot never answered /api/status"
           exit 1
       - name: portable suite
