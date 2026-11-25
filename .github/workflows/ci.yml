@@ -42,12 +42,14 @@ jobs:
           # the shared Windows Desktop runtime on the runner
           dotnet publish -c Release -r win-x64 --self-contained true -o ../../publish_out
           Pop-Location
-          # deterministic tokens so suites can carry a named act token
+          # same config shape install.ps1 proves on guests: rig profile +
+          # auto-arm in pilot.json (bool env "1" does NOT parse; write the JSON),
+          # named tokens for both scopes
           $dir = "$env:LOCALAPPDATA\WindowsPilot"
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Set-Content "$dir\tokens.json" -Value '{"act-rig-1":"act"}' -Encoding ascii
-          $env:PILOT_RIG = '1'         # localhost-friendly auth for CI
-          Start-Process -FilePath publish_out/WindowsPilot.exe
+          @{ bind='loopback'; governance=@{ allow_mcp_arm=$true; auto_arm='startup'; rate_per_min=300; rate_burst=60 }; capture=@{ prefer='gdi' }; rig=@{ profile=$true } } | ConvertTo-Json -Depth 5 | Set-Content "$dir\pilot.json" -Encoding UTF8
+          Set-Content "$dir\tokens.json" -Value '{"act-rig-1":"act","ro-rig-1":"ro"}' -Encoding ascii
+          Start-Process -FilePath "$PWD\publish_out\WindowsPilot.exe" -WorkingDirectory "$PWD\publish_out"
           Start-Sleep -Seconds 4
       - name: health gate
         shell: pwsh
