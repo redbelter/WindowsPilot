@@ -72,4 +72,8 @@ jobs:
       - name: portable suite
         run: python tests/windowspilot_smoke.py --base http://localhost:8791 --only health
       - name: governance rig
-        run: python tests/windowspilot_rig.py --base http://localhost:8791 --token act-rig-1
+        shell: pwsh
+        run: |
+          $out = python tests/windowspilot_rig.py --base http://localhost:8791 --token act-rig-1 2>&1 | Out-String
+          ($out -split "`r?`n" | Where-Object { $_ -match '^(FAIL|RESULT)' }) | ForEach-Object { Write-Output "::warning::$_" }
+          if ($LASTEXITCODE -ne 0) { exit 1 }
